@@ -398,7 +398,7 @@ function setupPlayer() {
       // to refresh it at once) and silently drop the completion. Waiting
       // here costs a fraction of a second per loop but guarantees each
       // listen is confirmed saved before the next one starts.
-      const result = await callListeningUpdate({ action: 'progress', session_id: finishedSessionId, position: finishedDuration });
+      const result = await callListeningUpdate({ action: 'progress', session_id: finishedSessionId, position: finishedDuration, final: true });
       if (!result) {
         // The optimistic bump above didn't actually get saved — pull the
         // real total back from the server so the on-screen count doesn't
