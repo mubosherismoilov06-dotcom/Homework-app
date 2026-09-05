@@ -1,0 +1,140 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+* { box-sizing: border-box; }
+
+:root {
+  /* Palette sampled from a sunset photo over rooftops: dusk-blue cloud
+     shadows at the top, fading through coral/salmon lit clouds to a warm
+     peach-gold horizon band. */
+  --navy-950: #171a35;  /* deepest dusk blue, top of sky */
+  --navy-900: #202449;  /* dusk blue-violet */
+  --navy-800: #2c2f5c;  /* cloud-shadow indigo */
+  --navy-700: #43447a;  /* lighter storm-cloud violet */
+  --gold-400: #f6a15c;  /* warm orange cloud-light */
+  --gold-500: #ef7c50;  /* coral/salmon lit cloud */
+  --gold-600: #d9603f;  /* deeper coral-orange */
+  --cream: #fdf1dd;     /* pale peach horizon glow */
+  --ink: #241f2e;
+  --muted: #756f8a;
+}
+
+body {
+  font-family: 'Inter', -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  margin: 0;
+  color: var(--ink);
+  font-size: 17px;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #322f5e 0%, transparent 60%),
+    radial-gradient(1000px 500px at 110% 10%, #4a3260 0%, transparent 55%),
+    linear-gradient(180deg, var(--navy-950), var(--navy-900) 40%, #191c38 100%);
+  min-height: 100vh;
+}
+
+h1, h2 {
+  font-family: 'Playfair Display', 'Inter', serif;
+  color: #f4ecd8;
+  letter-spacing: 0.2px;
+}
+
+.wrap { max-width: 480px; margin: 0 auto; padding: 16px; }
+.wrap-wide { max-width: 800px; margin: 0 auto; padding: 16px; }
+
+h1 {
+  font-size: 24px;
+  margin: 18px 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+h2 { font-size: 18px; margin: 20px 0 8px; color: var(--ink); font-family: 'Playfair Display', serif; }
+
+.card {
+  background: linear-gradient(180deg, #ffffff, var(--cream));
+  border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(239, 124, 80, 0.28);
+  box-shadow: 0 10px 30px rgba(8, 12, 30, 0.35), inset 0 1px 0 rgba(255,255,255,0.6);
+}
+
+label { display: block; font-weight: 600; margin: 12px 0 4px; color: var(--ink); }
+
+input[type=text], input[type=password], input[type=number], input[type=date], textarea, select {
+  width: 100%; padding: 12px 14px; font-size: 16px;
+  border: 1px solid #ddd3b6; border-radius: 10px;
+  background: #fffefb; color: var(--ink);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--gold-500);
+  box-shadow: 0 0 0 3px rgba(239, 124, 80, 0.28);
+}
+textarea { min-height: 80px; }
+
+button, .btn {
+  display: inline-block; padding: 14px 20px; font-size: 16px; font-weight: 700;
+  border: none; border-radius: 12px;
+  background: linear-gradient(135deg, var(--gold-400), var(--gold-600));
+  color: #241a05;
+  cursor: pointer; text-align: center; text-decoration: none; margin-top: 12px;
+  width: 100%;
+  box-shadow: 0 6px 16px rgba(217, 96, 63, 0.35);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+button:hover, .btn:hover { filter: brightness(1.05); transform: translateY(-1px); box-shadow: 0 8px 20px rgba(217, 96, 63, 0.45); }
+button:active, .btn:active { transform: translateY(0); }
+
+button.secondary {
+  background: #eef0f5; color: var(--navy-800); box-shadow: none;
+}
+button.danger { background: linear-gradient(135deg, #e0554f, #b8322c); color: #fff; box-shadow: 0 6px 16px rgba(184, 50, 44, 0.35); }
+button:disabled { opacity: 0.5; cursor: default; transform: none; }
+
+nav {
+  background: linear-gradient(180deg, var(--navy-900), var(--navy-950));
+  padding: 10px 0;
+  position: sticky; top: 0; z-index: 10;
+  border-bottom: 1px solid rgba(239, 124, 80, 0.28);
+}
+nav .wrap-wide, nav .wrap { display: flex; gap: 6px; overflow-x: auto; padding: 8px 16px; }
+nav a { color: #b7c0d8; text-decoration: none; padding: 8px 14px; border-radius: 10px; white-space: nowrap; font-size: 15px; font-weight: 500; }
+nav a.active { background: linear-gradient(135deg, var(--gold-400), var(--gold-600)); color: #241a05; font-weight: 700; }
+
+.progress-bar { background: #e9e3d0; border-radius: 10px; height: 20px; overflow: hidden; margin: 8px 0; }
+.progress-fill { background: linear-gradient(90deg, #2d6a4f, #40916c); height: 100%; transition: width 0.3s; }
+
+.badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 700; }
+.badge.done { background: #dcf5e3; color: #17643f; }
+.badge.progress { background: #fbeecb; color: #8a5a08; }
+.badge.none { background: #fbe1df; color: #962e28; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid #ece5d2; font-size: 15px; }
+th { color: var(--navy-800); font-weight: 700; }
+
+.error { color: #b8322c; margin-top: 8px; font-weight: 500; }
+.success { color: #17643f; margin-top: 8px; font-weight: 500; }
+a.link { color: var(--gold-600); font-weight: 600; }
+
+.big-num { font-size: 34px; font-weight: 700; color: var(--navy-800); font-family: 'Playfair Display', serif; }
+
+audio { width: 100%; margin-top: 8px; }
+
+#pwaInstallBanner {
+  position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 50;
+  background: var(--navy-950, #0b1120); color: #fff;
+  border: 1px solid rgba(239, 124, 80, 0.35);
+  border-radius: 14px; padding: 12px 14px;
+  display: flex; align-items: center; gap: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+}
+#pwaInstallBanner p { margin: 0; font-size: 14px; flex: 1; line-height: 1.35; }
+#pwaInstallBanner button {
+  width: auto; margin: 0; padding: 8px 14px; font-size: 14px;
+  background: linear-gradient(135deg, var(--gold-400, #e8c35c), var(--gold-600, #b5892c));
+  color: #241a05; font-weight: 700; border: none; border-radius: 10px;
+}
+#pwaInstallBanner .dismiss {
+  background: transparent; color: #b7c0d8; padding: 8px; font-weight: 400;
+}
