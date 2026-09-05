@@ -1,0 +1,22 @@
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/css/*
+  Cache-Control: public, max-age=3600, must-revalidate
+
+/js/*
+  Cache-Control: public, max-age=3600, must-revalidate
+
+/icons/*
+  Cache-Control: public, max-age=86400, must-revalidate
+
+/student/nav.js
+  Cache-Control: public, max-age=3600, must-revalidate
+
+/teacher/nav.js
+  Cache-Control: public, max-age=3600, must-revalidate
+
+/manifest.json
+  Cache-Control: public, max-age=3600, must-revalidate

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create Teacher Account</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>Create Your Teacher Account</h1>
+  <div class="card">
+    <p style="color:#666; font-size:14px;">This only works once — the first account created becomes the teacher account.</p>
+    <label>Your name</label>
+    <input type="text" id="name">
+    <label>Email (you'll log in with this)</label>
+    <input type="text" id="email">
+    <label>Password</label>
+    <input type="password" id="password">
+    <button onclick="createTeacher()" id="btn">Create Teacher Account</button>
+    <div class="error" id="err"></div>
+  </div>
+</div>
+<script>
+async function createTeacher() {
+  const errEl = document.getElementById('err');
+  errEl.textContent = '';
+  const name = document.getElementById('name').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  if (!name || !email || !password) { errEl.textContent = 'Please fill in all fields.'; return; }
+
+  document.getElementById('btn').disabled = true;
+  try {
+    const res = await fetch('/create-teacher', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password })
+    });
+    const result = await res.json();
+    if (!res.ok || result.error) { errEl.textContent = result.error || 'Something went wrong.'; document.getElementById('btn').disabled = false; return; }
+
+    const { error: loginErr } = await sb.auth.signInWithPassword({ email, password });
+    if (loginErr) { errEl.textContent = 'Account created — please log in from the login page.'; document.getElementById('btn').disabled = false; return; }
+
+    window.location.href = '/teacher/';
+  } catch (e) {
+    errEl.textContent = e.message;
+    document.getElementById('btn').disabled = false;
+  }
+}
+</script>
+</body>
+</html>

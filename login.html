@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Log In — Homework System</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>📚 English Homework System</h1>
+  <div class="card">
+    <label>Username</label>
+    <input type="text" id="username" autocapitalize="off" autocomplete="username">
+    <label>Password</label>
+    <input type="password" id="password" autocomplete="current-password">
+    <button onclick="doLogin()">Log In</button>
+    <div class="error" id="err"></div>
+  </div>
+  <p style="text-align:center; font-size:14px; color:#666;">
+    First time setting this up? <a class="link" href="/setup-teacher.html">Create the teacher account</a>
+  </p>
+</div>
+<script>
+// If already signed in (e.g. reopening the installed app), skip straight
+// past the login screen instead of asking for credentials again.
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return;
+  const { data: profile } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
+  if (profile && profile.active) {
+    window.location.href = profile.role === 'teacher' ? '/teacher/' : '/student/';
+  }
+})();
+
+async function doLogin() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const errEl = document.getElementById('err');
+  errEl.textContent = '';
+  if (!username || !password) { errEl.textContent = 'Please enter both fields.'; return; }
+
+  // Try as teacher (real email) first if it looks like one, otherwise treat as student username
+  let email = username.includes('@') ? username : usernameToEmail(username);
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { errEl.textContent = 'Incorrect username or password.'; return; }
+
+  const { data: profile } = await sb.from('profiles').select('*').eq('id', data.user.id).single();
+  if (!profile || !profile.active) {
+    await sb.auth.signOut();
+    errEl.textContent = 'This account is not active. Ask your teacher.';
+    return;
+  }
+  window.location.href = profile.role === 'teacher' ? '/teacher/' : '/student/';
+}
+document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+</script>
+</body>
+</html>
