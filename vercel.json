@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/listening-update", "destination": "/api/listening-update" },
+    { "source": "/leaderboard", "destination": "/api/leaderboard" },
+    { "source": "/create-student", "destination": "/api/create-student" },
+    { "source": "/delete-student", "destination": "/api/delete-student" },
+    { "source": "/create-teacher", "destination": "/api/create-teacher" }
+  ]
+}
