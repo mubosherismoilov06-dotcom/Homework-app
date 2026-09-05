@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Listening Homework</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/student/nav.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Loading…</h1>
+  <div class="card">
+    <p id="instructions"></p>
+    <p>Listen at least <b id="requiredToday">–</b> times before the deadline — whenever you're free, no daily split.</p>
+
+    <div style="display:flex; gap:8px; margin:12px 0 4px;">
+      <button type="button" id="modeListenBtn" onclick="setMode('listen')" style="flex:1; width:auto; margin-top:0;">🎧 Listening</button>
+      <button type="button" id="modeWriteBtn" class="secondary" onclick="setMode('write')" style="flex:1; width:auto; margin-top:0;">✍️ Listen &amp; Write</button>
+    </div>
+    <p id="modeHint" style="color:#666; font-size:14px; margin:0 0 10px;">This counts toward your required listens. Skipping ahead is blocked.</p>
+
+    <div class="progress-bar"><div class="progress-fill" id="fill" style="width:0%"></div></div>
+    <p><span class="big-num" id="doneCount">0</span> / <span id="reqCount">0</span></p>
+    <audio id="player" controls controlslist="nodownload noplaybackrate" style="width:100%;"></audio>
+
+    <div id="continuePrompt" style="display:none; margin-top:10px; padding:12px; background:#f3f4f6; border-radius:8px; text-align:center;">
+      <p style="margin:0 0 10px;">🎉 You've reached your required number of listens!</p>
+      <div style="display:flex; gap:8px;">
+        <button type="button" onclick="continueListening()" style="flex:1; width:auto; margin-top:0;">▶ Keep Listening</button>
+        <button type="button" class="secondary" onclick="stopListening()" style="flex:1; width:auto; margin-top:0;">⏹ Stop Here</button>
+      </div>
+    </div>
+
+    <div id="skipControls" style="display:none; margin-top:10px;">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button type="button" onclick="skip(-1)" style="flex:1; width:auto; margin-top:0;">⏪ Back</button>
+        <button type="button" onclick="skip(1)" style="flex:1; width:auto; margin-top:0;">Forward ⏩</button>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center; justify-content:center; margin-top:8px;">
+        <span style="color:#666; font-size:14px;">Skip amount:</span>
+        <button type="button" class="skipAmtBtn secondary" data-amt="1" onclick="setSkipAmount(1)" style="width:auto; margin-top:0; padding:4px 10px;">1s</button>
+        <button type="button" class="skipAmtBtn secondary" data-amt="2" onclick="setSkipAmount(2)" style="width:auto; margin-top:0; padding:4px 10px;">2s</button>
+        <button type="button" class="skipAmtBtn secondary" data-amt="5" onclick="setSkipAmount(5)" style="width:auto; margin-top:0; padding:4px 10px;">5s</button>
+        <button type="button" class="skipAmtBtn secondary" data-amt="10" onclick="setSkipAmount(10)" style="width:auto; margin-top:0; padding:4px 10px;">10s</button>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center; justify-content:center; margin-top:8px;">
+        <span style="color:#666; font-size:14px;">Speed:</span>
+        <button type="button" class="speedBtn secondary" data-speed="0.5" onclick="setSpeed(0.5)" style="width:auto; margin-top:0; padding:4px 10px;">0.5x</button>
+        <button type="button" class="speedBtn secondary" data-speed="0.75" onclick="setSpeed(0.75)" style="width:auto; margin-top:0; padding:4px 10px;">0.75x</button>
+        <button type="button" class="speedBtn" data-speed="1" onclick="setSpeed(1)" style="width:auto; margin-top:0; padding:4px 10px;">1x</button>
+        <button type="button" class="speedBtn secondary" data-speed="1.25" onclick="setSpeed(1.25)" style="width:auto; margin-top:0; padding:4px 10px;">1.25x</button>
+        <button type="button" class="speedBtn secondary" data-speed="1.5" onclick="setSpeed(1.5)" style="width:auto; margin-top:0; padding:4px 10px;">1.5x</button>
+      </div>
+    </div>
+
+    <p id="seekWarning" class="error" style="display:none;">⚠ You can't skip ahead — please listen from where you left off.</p>
+    <p id="netErr" class="error" style="display:none;"></p>
+    <p>Completed: <b id="completedNum">0</b> &nbsp; Remaining: <b id="remainingNum">0</b></p>
+  </div>
+
+  <div class="card" id="photoCard" style="display:none;">
+    <h2 style="margin-top:0;">Transcription Photo</h2>
+    <p>Take photo(s) of your handwritten transcription, or choose from your gallery/files. You can add several at once or one at a time, and remove any before submitting.</p>
+
+    <div id="submittedWrap" style="display:none; margin-bottom:14px;">
+      <p style="color:#666; font-size:14px; margin-bottom:6px;">Currently submitted:</p>
+      <div id="submittedThumbs" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+    </div>
+
+    <div id="photoActions">
+      <div style="display:flex; gap:8px;">
+        <button type="button" onclick="document.getElementById('photoCam').click()" style="flex:1; width:auto; margin-top:0;">📷 Take Photo</button>
+        <button type="button" class="secondary" onclick="document.getElementById('photoGallery').click()" style="flex:1; width:auto; margin-top:0;">🖼️ Gallery / Files</button>
+      </div>
+      <input type="file" id="photoCam" accept="image/*" capture="environment" multiple style="display:none">
+      <input type="file" id="photoGallery" accept="image/*" multiple style="display:none">
+
+      <div id="stagedThumbs" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;"></div>
+
+      <button type="button" id="submitPhotoBtn" onclick="submitPhoto()" disabled style="margin-top:12px;">Submit Photo(s)</button>
+    </div>
+
+    <div id="aiCheck" style="display:none; margin-top:14px; padding:14px; background:#f3f4f6; border-radius:8px; text-align:center;">
+      <div class="spinner" style="width:26px; height:26px; border:3px solid #d1d5db; border-top-color:#4b5563; border-radius:50%; margin:0 auto 10px; animation:spin 0.8s linear infinite;"></div>
+      <p id="aiCheckText" style="margin:0; color:#374151; font-size:14px;">🤖 AI is checking your photo…</p>
+    </div>
+    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+
+    <div class="error" id="photoErr"></div>
+    <div class="success" id="photoOk"></div>
+  </div>
+
+  <div class="card" id="lyricsCard" style="display:none;">
+    <h2 style="margin-top:0;">📝 Lyrics / Transcript</h2>
+    <div id="lyricsText" style="white-space:pre-wrap; color:#333;"></div>
+  </div>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const hwId = params.get('id');
+let profile, hw, sessionId = null, lastKnownPosition = 0, pollTimer = null;
+let mode = 'listen'; // 'listen' = counts toward required listens, locked seeking. 'write' = free scrubbing, never counted.
+let skipAmount = 5; // seconds moved by the back/forward buttons in Listen & Write mode
+let staged = []; // { id, file, url } photos picked but not yet submitted
+let aiCheckTimer = null;
+
+function setSkipAmount(amt) {
+  skipAmount = amt;
+  document.querySelectorAll('.skipAmtBtn').forEach(btn => {
+    btn.className = Number(btn.dataset.amt) === amt ? '' : 'secondary';
+  });
+}
+
+function setSpeed(rate) {
+  document.getElementById('player').playbackRate = rate;
+  document.querySelectorAll('.speedBtn').forEach(btn => {
+    btn.className = Number(btn.dataset.speed) === rate ? '' : 'secondary';
+  });
+}
+
+function skip(direction) {
+  const audio = document.getElementById('player');
+  const dur = audio.duration || 0;
+  audio.currentTime = Math.min(Math.max(audio.currentTime + direction * skipAmount, 0), dur);
+}
+
+function setMode(m) {
+  if (m === mode) return;
+  const audio = document.getElementById('player');
+
+  // Switching modes always stops playback and drops any in-progress
+  // "listen" session so the two modes can never share/blend tracking state.
+  audio.pause();
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  sessionId = null;
+  document.getElementById('seekWarning').style.display = 'none';
+  audio.playbackRate = 1;
+  setSpeed(1);
+
+  mode = m;
+  document.getElementById('modeListenBtn').className = mode === 'listen' ? '' : 'secondary';
+  document.getElementById('modeWriteBtn').className = mode === 'write' ? '' : 'secondary';
+
+  if (mode === 'listen') {
+    // Always resume a counted listen from the start, so "reaching the end"
+    // means what it says and can't be shortcut by a leftover scrub position.
+    audio.currentTime = 0;
+    lastKnownPosition = 0;
+    document.getElementById('modeHint').textContent = "This counts toward your required listens. Skipping ahead is blocked.";
+    document.getElementById('skipControls').style.display = 'none';
+  } else {
+    document.getElementById('modeHint').textContent = "Scrub back and forth freely to write it down — this never counts toward your required listens.";
+    document.getElementById('skipControls').style.display = '';
+  }
+}
+
+async function load() {
+  const { data } = await sb.from('homework').select('*').eq('id', hwId).single();
+  hw = data;
+  document.title = hw.title;
+  document.getElementById('title').textContent = '🎧 ' + hw.title;
+  document.getElementById('instructions').textContent = hw.instructions || '';
+  const required = hw.total_required_listens || hw.listens_per_day || 0;
+  document.getElementById('requiredToday').textContent = required;
+  document.getElementById('reqCount').textContent = required;
+  document.getElementById('photoCard').style.display = hw.require_photo ? '' : 'none';
+
+  const { data: urlData } = await sb.storage.from('homework-audio').createSignedUrl(hw.audio_file_path, 3600);
+  document.getElementById('player').src = urlData.signedUrl;
+
+  await refreshProgress();
+  await refreshPhotoStatus();
+  setupPlayer();
+}
+
+async function refreshProgress() {
+  // Cumulative across the WHOLE assignment window — no per-day reset.
+  // Summed across all rows for this homework+student so both old (per-day)
+  // and new (single day_number=1) data are counted correctly.
+  const { data: rows } = await sb.from('listening_progress').select('completed_listens')
+    .eq('homework_id', hwId).eq('student_id', profile.id);
+  const done = (rows || []).reduce((sum, r) => sum + r.completed_listens, 0);
+  const req = hw.total_required_listens || hw.listens_per_day || 0;
+  renderProgress(done, req);
+  return { done, req };
+}
+
+function renderProgress(done, req) {
+  document.getElementById('doneCount').textContent = done;
+  document.getElementById('completedNum').textContent = done;
+  document.getElementById('remainingNum').textContent = Math.max(req - done, 0);
+  // Bar visually caps at 100% — going past the requirement never shows over-full.
+  document.getElementById('fill').style.width = (req ? Math.min(100, (done / req) * 100) : 0) + '%';
+}
+
+// Bump the on-screen count the instant a listen finishes, rather than
+// waiting on the network round-trip to the server — the real number from
+// refreshProgress() overwrites this moments later, so it's purely a
+// perceived-speed fix, never the source of truth.
+function optimisticIncrementProgress() {
+  const req = hw.total_required_listens || hw.listens_per_day || 0;
+  const done = (parseInt(document.getElementById('doneCount').textContent) || 0) + 1;
+  renderProgress(done, req);
+}
+
+async function refreshPhotoStatus() {
+  const { data: sub } = await sb.from('submissions').select('*')
+    .eq('homework_id', hwId).eq('student_id', profile.id).eq('type', 'photo').maybeSingle();
+  if (sub) {
+    const paths = sub.file_path.split(',');
+    document.getElementById('photoOk').textContent = `✓ ${paths.length} photo${paths.length === 1 ? '' : 's'} submitted. Submitting new photos will replace them.`;
+    await renderSubmittedThumbs(paths);
+    revealLyrics();
+  }
+}
+
+async function renderSubmittedThumbs(paths) {
+  const wrap = document.getElementById('submittedWrap');
+  const el = document.getElementById('submittedThumbs');
+  el.innerHTML = '';
+  for (const p of paths) {
+    const { data } = await sb.storage.from('submissions').createSignedUrl(p, 3600);
+    if (data) {
+      const img = document.createElement('img');
+      img.src = data.signedUrl;
+      img.style.cssText = 'width:80px; height:80px; object-fit:cover; border-radius:6px; border:1px solid #e5e7eb;';
+      el.appendChild(img);
+    }
+  }
+  wrap.style.display = paths.length ? '' : 'none';
+}
+
+function revealLyrics() {
+  if (!hw.lyrics) return;
+  document.getElementById('lyricsText').textContent = hw.lyrics;
+  document.getElementById('lyricsCard').style.display = '';
+}
+
+function showNetErr(msg) {
+  const el = document.getElementById('netErr');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+function clearNetErr() {
+  document.getElementById('netErr').style.display = 'none';
+}
+
+// Every call to the listening-update function goes through here so a
+// stale/expired session (common after the phone screen locks mid-listen)
+// gets refreshed-and-retried by authedFetch instead of silently throwing
+// and dropping the listen with no error shown to the student. Returns the
+// parsed JSON result, or null if the call ultimately failed (in which case
+// an error banner is already shown).
+async function callListeningUpdate(body) {
+  try {
+    const res = await authedFetch('/listening-update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res) return null; // authedFetch already redirected to login
+    const result = await res.json();
+    if (!res.ok) {
+      showNetErr(result.error === 'not assigned to this homework'
+        ? '⚠ This homework isn\'t assigned to you — ask your teacher.'
+        : '⚠ Could not save your listen (connection issue). Please try again.');
+      return null;
+    }
+    clearNetErr();
+    return result;
+  } catch (e) {
+    showNetErr('⚠ Could not reach the server — check your connection and try again.');
+    return null;
+  }
+}
+
+// Resolves once audio.duration is a real, finite number — on a slow mobile
+// connection metadata can still be loading when 'play' fires, and
+// `audio.duration || 0` would silently record a 0-second track (making the
+// very first progress poll falsely count as "reached the end").
+function waitForValidDuration(audio) {
+  if (Number.isFinite(audio.duration) && audio.duration > 0) return Promise.resolve(audio.duration);
+  return new Promise(resolve => {
+    const onLoaded = () => {
+      audio.removeEventListener('loadedmetadata', onLoaded);
+      audio.removeEventListener('durationchange', onLoaded);
+      resolve(Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0);
+    };
+    audio.addEventListener('loadedmetadata', onLoaded);
+    audio.addEventListener('durationchange', onLoaded);
+    // Don't wait forever — if metadata genuinely never resolves (broken
+    // file, etc.), fall back to 0 after a few seconds rather than hang.
+    setTimeout(onLoaded, 6000);
+  });
+}
+
+function setupPlayer() {
+  const audio = document.getElementById('player');
+
+  // Everything below that talks to the server, or restricts seeking, only
+  // applies in 'listen' mode. In 'write' mode the audio element behaves
+  // like a plain player: free scrubbing, nothing reported, nothing counted.
+
+  audio.addEventListener('play', async () => {
+    if (mode !== 'listen') return;
+    document.getElementById('continuePrompt').style.display = 'none';
+    if (!sessionId) {
+      const duration = await waitForValidDuration(audio);
+      if (!duration) {
+        showNetErr('⚠ Could not read the audio file — please reload the page and try again.');
+        audio.pause();
+        return;
+      }
+      const result = await callListeningUpdate({ action: 'start', homework_id: hwId, student_id: profile.id, duration });
+      if (!result || !result.session_id) {
+        // Couldn't start a tracked session — stop playback rather than let
+        // the student listen through the whole track for nothing, since
+        // with no sessionId none of it would ever get counted.
+        audio.pause();
+        return;
+      }
+      sessionId = result.session_id;
+      lastKnownPosition = 0;
+    }
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(reportProgress, 2500);
+  });
+
+  audio.addEventListener('seeking', () => {
+    if (mode !== 'listen') return; // free scrubbing allowed in Listen & Write mode
+    const tolerance = 1.5;
+    if (audio.currentTime > lastKnownPosition + tolerance) {
+      audio.currentTime = lastKnownPosition;
+      document.getElementById('seekWarning').style.display = '';
+      setTimeout(() => document.getElementById('seekWarning').style.display = 'none', 2500);
+      reportSeekAttempt();
+    }
+  });
+
+  audio.addEventListener('timeupdate', () => {
+    if (mode !== 'listen') return;
+    if (audio.currentTime > lastKnownPosition) lastKnownPosition = audio.currentTime;
+  });
+
+  audio.addEventListener('pause', () => { if (pollTimer) clearInterval(pollTimer); });
+
+  audio.addEventListener('ended', async () => {
+    if (mode !== 'listen') { audio.currentTime = 0; return; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
+    // Capture this session before clearing it, so the 'play' event we're
+    // about to trigger starts a brand-new session instead of reusing this
+    // finished one.
+    const finishedSessionId = sessionId;
+    const finishedDuration = audio.duration;
+    sessionId = null;
+    lastKnownPosition = 0;
+    audio.currentTime = 0;
+
+    // Decide up front, from the number already on screen, whether this
+    // listen will meet or pass the requirement — no need to wait on the
+    // server to know that. Below the requirement: auto-restart once the
+    // completion report below has actually finished. At/above it: stop and
+    // let the student choose whether to keep going instead of looping
+    // forever unasked.
+    const required = hw.total_required_listens || hw.listens_per_day || 0;
+    const doneSoFar = parseInt(document.getElementById('doneCount').textContent) || 0;
+    const reachesRequired = required > 0 && (doneSoFar + 1) >= required;
+
+    if (!reachesRequired) {
+      document.getElementById('modeHint').textContent = '🔁 Saving your listen…';
+    } else {
+      document.getElementById('modeHint').textContent = '';
+      document.getElementById('continuePrompt').style.display = '';
+    }
+
+    if (finishedSessionId) {
+      // Count this listen on screen right away — don't make the student
+      // wait on the server round-trip to see their number go up.
+      optimisticIncrementProgress();
+
+      // Deliberately awaited before any auto-restart below: starting a new
+      // session while this one's completion report is still in flight
+      // means two concurrent server calls for the same student, which can
+      // step on each other (e.g. both hitting an expired token and racing
+      // to refresh it at once) and silently drop the completion. Waiting
+      // here costs a fraction of a second per loop but guarantees each
+      // listen is confirmed saved before the next one starts.
+      const result = await callListeningUpdate({ action: 'progress', session_id: finishedSessionId, position: finishedDuration, final: true });
+      if (!result) {
+        // The optimistic bump above didn't actually get saved — pull the
+        // real total back from the server so the on-screen count doesn't
+        // lie about a listen that was never recorded.
+        await refreshProgress();
+      } else if (result.completed && typeof result.done === 'number') {
+        // Render the server's authoritative numbers directly — no extra
+        // round-trip needed, so the real count lands on screen as fast as
+        // the network allows, right on top of the instant optimistic bump.
+        renderProgress(result.done, result.required);
+        if (result.done >= result.required) {
+          document.getElementById('continuePrompt').style.display = '';
+          document.getElementById('modeHint').textContent = '';
+        }
+      } else {
+        // The call succeeded but the server didn't count this as a full,
+        // legitimate listen (most often: the screen locked or the tab was
+        // backgrounded partway through, which throttles the browser's
+        // progress-tracking events enough to fall outside the allowed
+        // tolerance). Undo the optimistic bump immediately instead of
+        // leaving a number on screen that only corrects itself on the next
+        // reload — and tell the student so they know to try again.
+        await refreshProgress();
+        showNetErr('⚠ That listen wasn\'t counted — if your screen locked or you switched apps mid-listen, please listen again without leaving the page.');
+      }
+    }
+
+    if (!reachesRequired) {
+      document.getElementById('modeHint').textContent = '🔁 Restarting automatically for your next listen…';
+      audio.play().catch(() => {
+        document.getElementById('modeHint').textContent = 'Tap ▶ play to continue your next listen.';
+      });
+    }
+  });
+}
+
+function continueListening() {
+  document.getElementById('continuePrompt').style.display = 'none';
+  const audio = document.getElementById('player');
+  document.getElementById('modeHint').textContent = '🔁 Restarting automatically for your next listen…';
+  audio.play().catch(() => {
+    document.getElementById('modeHint').textContent = 'Tap ▶ play to continue your next listen.';
+  });
+}
+
+function stopListening() {
+  document.getElementById('continuePrompt').style.display = 'none';
+  document.getElementById('modeHint').textContent = "🎉 You've completed your required listens. Come back any time to listen more.";
+}
+
+async function reportSeekAttempt() {
+  if (!sessionId) return;
+  // Best-effort — a dropped seek-attempt count isn't worth surfacing an
+  // error banner over, so no showNetErr here even if it fails.
+  authedFetch('/listening-update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'seek_attempt', session_id: sessionId })
+  }).catch(() => {});
+}
+
+async function reportProgress(isFinal) {
+  if (!sessionId) return;
+  const audio = document.getElementById('player');
+  const result = await callListeningUpdate({ action: 'progress', session_id: sessionId, position: isFinal ? audio.duration : audio.currentTime });
+  // Render straight from this response — the server already computed the
+  // authoritative done/required totals, so there's no need for a second
+  // round-trip fetch just to display what we already have in hand.
+  if (result && result.completed && typeof result.done === 'number') renderProgress(result.done, result.required);
+}
+
+// ---- Photo staging (add/preview/remove before submit) ----
+
+function handleFilePick(fileList) {
+  Array.from(fileList).forEach(file => {
+    staged.push({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) });
+  });
+  renderStaged();
+}
+
+function renderStaged() {
+  const el = document.getElementById('stagedThumbs');
+  el.innerHTML = '';
+  staged.forEach(item => {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:relative; width:80px; height:80px;';
+    box.innerHTML = `
+      <img src="${item.url}" style="width:80px; height:80px; object-fit:cover; border-radius:6px; border:1px solid #e5e7eb;">
+      <button type="button" onclick="removeStaged('${item.id}')" title="Remove"
+        style="position:absolute; top:-6px; right:-6px; width:22px; height:22px; margin:0; padding:0;
+        border-radius:50%; background:#dc2626; color:#fff; border:2px solid #fff; font-size:13px; line-height:1;">×</button>`;
+    el.appendChild(box);
+  });
+  document.getElementById('submitPhotoBtn').disabled = staged.length === 0;
+}
+
+function removeStaged(id) {
+  const item = staged.find(s => s.id === id);
+  if (item) URL.revokeObjectURL(item.url);
+  staged = staged.filter(s => s.id !== id);
+  renderStaged();
+}
+
+document.getElementById('photoCam').addEventListener('change', e => { handleFilePick(e.target.files); e.target.value = ''; });
+document.getElementById('photoGallery').addEventListener('change', e => { handleFilePick(e.target.files); e.target.value = ''; });
+
+// ---- "AI is checking" reassurance while the real upload happens ----
+
+const AI_CHECK_MESSAGES = [
+  '📤 Uploading your photo(s)…',
+  '🔍 AI is reading your handwriting…',
+  '🎧 Comparing it against the audio…',
+  '✅ Verifying word-for-word accuracy…'
+];
+
+function showAiCheck() {
+  const el = document.getElementById('aiCheck');
+  const textEl = document.getElementById('aiCheckText');
+  el.style.display = '';
+  let i = 0;
+  textEl.textContent = AI_CHECK_MESSAGES[0];
+  aiCheckTimer = setInterval(() => {
+    i = (i + 1) % AI_CHECK_MESSAGES.length;
+    textEl.textContent = AI_CHECK_MESSAGES[i];
+  }, 850);
+}
+
+function hideAiCheck() {
+  if (aiCheckTimer) { clearInterval(aiCheckTimer); aiCheckTimer = null; }
+  document.getElementById('aiCheck').style.display = 'none';
+}
+
+async function submitPhoto() {
+  if (staged.length === 0) return;
+  const errEl = document.getElementById('photoErr'), okEl = document.getElementById('photoOk');
+  errEl.textContent = ''; okEl.textContent = '';
+  document.getElementById('photoActions').style.display = 'none';
+  showAiCheck();
+
+  const uploadWork = (async () => {
+    const paths = [];
+    for (let i = 0; i < staged.length; i++) {
+      const file = staged[i].file;
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `${profile.id}/${hwId}-transcription-${Date.now()}-${i + 1}.${ext}`;
+      const { error: upErr } = await sb.storage.from('submissions').upload(path, file, { upsert: true });
+      if (upErr) throw upErr;
+      paths.push(path);
+    }
+    const { data: existing } = await sb.from('submissions').select('id')
+      .eq('homework_id', hwId).eq('student_id', profile.id).eq('type', 'photo').maybeSingle();
+    if (existing) {
+      await sb.from('submissions').update({ file_path: paths.join(','), submitted_at: new Date().toISOString() }).eq('id', existing.id);
+    } else {
+      await sb.from('submissions').insert({ homework_id: hwId, student_id: profile.id, type: 'photo', file_path: paths.join(',') });
+    }
+    return paths;
+  })();
+
+  // Minimum runtime for the reassurance panel, so it never flashes by
+  // instantly even on a fast connection — this is what sells the "checking".
+  const minWait = new Promise(res => setTimeout(res, 3400));
+
+  try {
+    const [paths] = await Promise.all([uploadWork, minWait]);
+    hideAiCheck();
+    staged.forEach(s => URL.revokeObjectURL(s.url));
+    staged = [];
+    document.getElementById('stagedThumbs').innerHTML = '';
+    document.getElementById('photoActions').style.display = '';
+    document.getElementById('submitPhotoBtn').disabled = true;
+    okEl.textContent = `✓ ${paths.length} photo${paths.length === 1 ? '' : 's'} submitted!`;
+    await renderSubmittedThumbs(paths);
+    revealLyrics();
+  } catch (err) {
+    hideAiCheck();
+    document.getElementById('photoActions').style.display = '';
+    errEl.textContent = err.message || 'Upload failed, please try again.';
+  }
+}
+
+(async () => {
+  profile = await requireStudent();
+  if (!profile) return;
+  renderStudentNav('My Homework');
+  setSkipAmount(skipAmount);
+  load();
+})();
+</script>
+</body>
+</html>
