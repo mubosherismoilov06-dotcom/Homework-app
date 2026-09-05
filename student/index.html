@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Homework</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/student/nav.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>My Homework</h1>
+  <div id="list">Loading…</div>
+</div>
+<script>
+(async () => {
+  const profile = await requireStudent();
+  if (!profile) return;
+  renderStudentNav('My Homework');
+
+  const { data: assigned } = await sb.from('homework_assignments').select('homework:homework_id(*)').eq('student_id', profile.id);
+  const list = (assigned || []).map(a => a.homework).filter(h => h && !h.archived);
+  const el = document.getElementById('list');
+  if (list.length === 0) { el.innerHTML = '<div class="card">No homework assigned yet.</div>'; return; }
+
+  let html = '';
+  for (const hw of list) {
+    if (hw.type === 'listening') {
+      // Listening is tracked as ONE cumulative total across the whole
+      // assignment window, not a per-day quota — sum every progress row
+      // for this homework+student instead of looking up "today's" row.
+      const { data: progressRows } = await sb.from('listening_progress').select('completed_listens')
+        .eq('homework_id', hw.id).eq('student_id', profile.id);
+      const done = (progressRows || []).reduce((sum, r) => sum + r.completed_listens, 0);
+      const required = hw.total_required_listens || hw.listens_per_day || 0;
+      const { data: photo } = await sb.from('submissions').select('id')
+        .eq('homework_id', hw.id).eq('student_id', profile.id).eq('type', 'photo').maybeSingle();
+      html += `<div class="card">
+        <b>🎧 ${escapeHtml(hw.title)}</b><br>
+        Listens: <b>${done} / ${required}</b> before ${hw.deadline}<br>
+        ${hw.require_photo ? `Transcription: ${photo ? 'Submitted ✓' : 'Not submitted'}<br>` : ''}
+        <a class="btn" href="/student/listening.html?id=${hw.id}">Open</a>
+      </div>`;
+    } else if (hw.type === 'reading') {
+      const { data: readingSubs } = await sb.from('submissions').select('id')
+        .eq('homework_id', hw.id).eq('student_id', profile.id).eq('type', 'reading_audio');
+      const { data: retellingSubs } = await sb.from('submissions').select('id')
+        .eq('homework_id', hw.id).eq('student_id', profile.id).eq('type', 'retelling_audio');
+      html += `<div class="card">
+        <b>🎤 ${escapeHtml(hw.title)}</b><br>
+        Reading recordings: <b>${(readingSubs || []).length}</b> &nbsp; Retelling recordings: <b>${(retellingSubs || []).length}</b><br>
+        <a class="btn" href="/student/reading.html?id=${hw.id}">Open</a>
+      </div>`;
+    } else if (hw.type === 'vocabulary' || hw.type === 'grammar') {
+      const { data: photoSub } = await sb.from('submissions').select('id')
+        .eq('homework_id', hw.id).eq('student_id', profile.id).eq('type', 'photo').maybeSingle();
+      const icon = hw.type === 'vocabulary' ? '📚' : '✏️';
+      const label = hw.type === 'vocabulary' ? 'Vocabulary' : 'Grammar';
+      html += `<div class="card">
+        <b>${icon} ${escapeHtml(hw.title)}</b><br>
+        ${label} homework<br>
+        Submitted: ${photoSub ? 'Yes ✓' : 'Not submitted'}<br>
+        <a class="btn" href="/student/${hw.type}.html?id=${hw.id}">Open</a>
+      </div>`;
+    } else {
+      const { data: textSub } = await sb.from('submissions').select('id')
+        .eq('homework_id', hw.id).eq('student_id', profile.id).eq('type', 'chat_text').maybeSingle();
+      const { data: photoSub } = await sb.from('submissions').select('id')
+        .eq('homework_id', hw.id).eq('student_id', profile.id).eq('type', 'chat_photo').maybeSingle();
+      html += `<div class="card">
+        <b>💬 ${escapeHtml(hw.title)}</b><br>
+        ChatGPT chat<br>
+        Submitted: ${(textSub || photoSub) ? 'Yes ✓' : 'Not submitted'}<br>
+        <a class="btn" href="/student/chatgpt.html?id=${hw.id}">Open</a>
+      </div>`;
+    }
+  }
+  el.innerHTML = html;
+})();
+
+function escapeHtml(s) { return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>

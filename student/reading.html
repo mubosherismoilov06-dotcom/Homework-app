@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading / Retelling Homework</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<style>
+.lightbox-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.94); z-index: 1000;
+  display: none; align-items: center; justify-content: center;
+  overflow: hidden; touch-action: none; overscroll-behavior: contain;
+}
+.lightbox-overlay.open { display: flex; }
+.lightbox-img {
+  max-width: none; max-height: none; touch-action: none;
+  user-select: none; -webkit-user-select: none; -webkit-user-drag: none;
+  cursor: grab; will-change: transform;
+}
+.lightbox-img.grabbing { cursor: grabbing; }
+.lightbox-close {
+  position: absolute; top: 14px; right: 14px; width: 42px; height: 42px;
+  border-radius: 50%; background: rgba(255,255,255,0.15); color: #fff;
+  border: none; font-size: 20px; line-height: 1; display: flex;
+  align-items: center; justify-content: center; z-index: 2; margin-top: 0;
+}
+.lightbox-hint {
+  position: absolute; bottom: 16px; left: 0; right: 0; text-align: center;
+  color: rgba(255,255,255,0.65); font-size: 12px; pointer-events: none;
+  transition: opacity 0.4s;
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/student/nav.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Loading…</h1>
+  <div class="card" style="position:sticky; top:8px; z-index:5; max-height:38vh; overflow-y:auto; box-shadow:0 2px 8px rgba(0,0,0,0.15);">
+    <p style="margin:0 0 8px; color:#666; font-size:13px; font-weight:600;">📖 PASSAGE — stays visible while you record</p>
+    <p id="instructions"></p>
+    <div class="card" id="material" style="background:#f9fafb;"></div>
+    <div id="materialFile" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="lightbox-overlay" id="lightboxOverlay">
+    <button type="button" class="lightbox-close" onclick="closeLightbox()">✕</button>
+    <img class="lightbox-img" id="lightboxImg" alt="Reading passage — zoomed">
+    <p class="lightbox-hint" id="lightboxHint">Pinch or scroll to zoom · drag to move · double-tap to reset</p>
+  </div>
+
+  <div class="card" id="panel-reading">
+    <h2 style="margin-top:0;">🎤 Reading</h2>
+    <p style="color:#666; font-size:14px; margin-top:-8px;">Read the passage above out loud while recording. Each recording is sent one at a time — you can record as many times as you like.</p>
+    <p id="reading-required-line" style="margin:0 0 4px; display:none;">Required: send <b id="reading-required">–</b> recording(s).</p>
+    <div class="progress-bar" id="reading-progressWrap" style="display:none;"><div class="progress-fill" id="reading-fill" style="width:0%"></div></div>
+    <p style="margin:0 0 4px;">Recordings sent so far: <span class="big-num" id="reading-count">0</span><span id="reading-reqSuffix"></span></p>
+    <p id="reading-doneMsg" class="success" style="display:none;">🎉 You've sent the required number of reading recordings!</p>
+    <button id="reading-recordBtn" onclick="toggleRecord('reading')">🎙 Record Audio</button>
+    <p id="reading-status" style="text-align:center; color:#666;"></p>
+    <audio id="reading-preview" controls style="display:none;"></audio>
+    <button onclick="submitAudio('reading')" id="reading-submitBtn" disabled>Send This Recording</button>
+    <div class="error" id="reading-err"></div>
+    <div class="success" id="reading-ok"></div>
+    <div id="reading-list" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="card" id="panel-retelling">
+    <h2 style="margin-top:0;">🗣 Retelling</h2>
+    <p style="color:#666; font-size:14px; margin-top:-8px;">Now, without reading, retell the passage in your own words while recording. Each recording is sent one at a time — you can record as many times as you like.</p>
+    <p style="margin:0 0 4px;">Recordings sent so far: <span class="big-num" id="retelling-count">0</span></p>
+    <button id="retelling-recordBtn" onclick="toggleRecord('retelling')">🎙 Record Audio</button>
+    <p id="retelling-status" style="text-align:center; color:#666;"></p>
+    <audio id="retelling-preview" controls style="display:none;"></audio>
+    <button onclick="submitAudio('retelling')" id="retelling-submitBtn" disabled>Send This Recording</button>
+    <div class="error" id="retelling-err"></div>
+    <div class="success" id="retelling-ok"></div>
+    <div id="retelling-list" style="margin-top:10px;"></div>
+  </div>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const hwId = params.get('id');
+let profile, hw;
+
+// Independent recording state per panel, keyed by kind ('reading' | 'retelling').
+const rec = {
+  reading: { mediaRecorder: null, chunks: [], blob: null, isRecording: false },
+  retelling: { mediaRecorder: null, chunks: [], blob: null, isRecording: false }
+};
+
+async function load() {
+  const { data } = await sb.from('homework').select('*').eq('id', hwId).single();
+  hw = data;
+  document.title = hw.title;
+  document.getElementById('title').textContent = '🎤 ' + hw.title;
+  document.getElementById('instructions').textContent = hw.instructions || '';
+  document.getElementById('material').textContent = hw.reading_material || '';
+
+  if (hw.reading_recordings_required) {
+    document.getElementById('reading-required-line').style.display = '';
+    document.getElementById('reading-progressWrap').style.display = '';
+    document.getElementById('reading-required').textContent = hw.reading_recordings_required;
+  }
+
+  if (hw.reading_material_file_path) {
+    const { data: matUrlData } = await sb.storage.from('homework-materials').createSignedUrl(hw.reading_material_file_path, 3600);
+    const isImage = /\.(jpe?g|png|gif|webp)$/i.test(hw.reading_material_file_path);
+    const wrap = document.getElementById('materialFile');
+    if (matUrlData) {
+      wrap.innerHTML = isImage
+        ? `<img src="${matUrlData.signedUrl}" alt="Reading passage" style="max-width:100%; border-radius:8px; cursor:zoom-in;" onclick="openLightbox('${matUrlData.signedUrl}')">
+           <p style="color:#888; font-size:12px; margin:4px 0 0;">🔍 Tap the image to view full size and zoom in</p>`
+        : `<a class="link" href="${matUrlData.signedUrl}" target="_blank">📄 View reading passage</a>`;
+    }
+  }
+
+  await refreshList('reading');
+  await refreshList('retelling');
+}
+
+async function toggleRecord(kind) {
+  const state = rec[kind];
+  const btn = document.getElementById(kind + '-recordBtn'), status = document.getElementById(kind + '-status');
+  if (!state.isRecording) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      status.textContent = 'Recording is not supported on this device/browser.';
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      state.chunks = [];
+      state.mediaRecorder = new MediaRecorder(stream);
+      state.mediaRecorder.ondataavailable = e => state.chunks.push(e.data);
+      state.mediaRecorder.onstop = () => {
+        state.blob = new Blob(state.chunks, { type: 'audio/webm' });
+        const preview = document.getElementById(kind + '-preview');
+        preview.src = URL.createObjectURL(state.blob);
+        preview.style.display = '';
+        document.getElementById(kind + '-submitBtn').disabled = false;
+        stream.getTracks().forEach(t => t.stop());
+      };
+      state.mediaRecorder.start();
+      state.isRecording = true;
+      btn.textContent = '⏹ Stop Recording';
+      document.getElementById(kind + '-submitBtn').disabled = true;
+      status.textContent = 'Recording… tap Stop when finished.';
+    } catch (e) {
+      status.textContent = 'Could not access microphone: ' + e.message;
+    }
+  } else {
+    state.mediaRecorder.stop();
+    state.isRecording = false;
+    btn.textContent = '🎙 Record Again';
+    status.textContent = 'Recording ready below — review it, then send it.';
+  }
+}
+
+async function submitAudio(kind) {
+  const state = rec[kind];
+  const errEl = document.getElementById(kind + '-err'), okEl = document.getElementById(kind + '-ok');
+  errEl.textContent = ''; okEl.textContent = '';
+  if (!state.blob) { errEl.textContent = 'Please record an audio clip first.'; return; }
+
+  document.getElementById(kind + '-submitBtn').disabled = true;
+  const path = `${profile.id}/${hwId}-${kind}-${Date.now()}.webm`;
+  const { error: upErr } = await sb.storage.from('submissions').upload(path, state.blob);
+  if (upErr) { errEl.textContent = upErr.message; document.getElementById(kind + '-submitBtn').disabled = false; return; }
+
+  const { error: insErr } = await sb.from('submissions').insert({
+    homework_id: hwId, student_id: profile.id, type: kind + '_audio', file_path: path
+  });
+  if (insErr) { errEl.textContent = insErr.message; document.getElementById(kind + '-submitBtn').disabled = false; return; }
+
+  // Reset for the next take — recordings go one by one, never batched.
+  state.blob = null; state.chunks = [];
+  document.getElementById(kind + '-preview').style.display = 'none';
+  document.getElementById(kind + '-recordBtn').textContent = '🎙 Record Audio';
+  document.getElementById(kind + '-status').textContent = '';
+  okEl.textContent = '✓ Recording sent!';
+  await refreshList(kind);
+}
+
+async function refreshList(kind) {
+  const { data: subs } = await sb.from('submissions').select('*')
+    .eq('homework_id', hwId).eq('student_id', profile.id).eq('type', kind + '_audio')
+    .order('submitted_at', { ascending: true });
+  const list = subs || [];
+  document.getElementById(kind + '-count').textContent = list.length;
+
+  if (kind === 'reading' && hw.reading_recordings_required) {
+    const required = hw.reading_recordings_required;
+    const pct = Math.min(100, Math.round((list.length / required) * 100));
+    document.getElementById('reading-fill').style.width = pct + '%';
+    document.getElementById('reading-reqSuffix').textContent = ` / ${required}`;
+    document.getElementById('reading-doneMsg').style.display = list.length >= required ? '' : 'none';
+  }
+
+  const listEl = document.getElementById(kind + '-list');
+  if (list.length === 0) { listEl.innerHTML = ''; return; }
+  listEl.innerHTML = '<p style="color:#666; font-size:13px; font-weight:600; margin:10px 0 4px;">Your recordings</p>' +
+    list.map((s, i) => `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #eee; font-size:14px;">
+      <span>#${i + 1} — ${new Date(s.submitted_at).toLocaleString()}</span>
+      <a class="link" href="#" onclick="playRecording('${kind}', '${s.file_path}'); return false;">▶ Play</a>
+    </div>`).join('');
+}
+
+async function playRecording(kind, path) {
+  const { data } = await sb.storage.from('submissions').createSignedUrl(path, 3600);
+  if (!data) return;
+  const preview = document.getElementById(kind + '-preview');
+  preview.src = data.signedUrl;
+  preview.style.display = '';
+  preview.play();
+}
+
+// ---- Passage image lightbox: pinch-zoom + drag-to-pan (touch, mouse, wheel) ----
+
+const lightbox = {
+  overlay: null, img: null, hint: null,
+  scale: 1, minScale: 1, maxScale: 5,
+  x: 0, y: 0,
+  pointers: new Map(), // active pointerId -> {x,y}
+  pinchStartDist: 0, pinchStartScale: 1,
+  panStart: null, // {x,y, originX, originY}
+  lastTapTime: 0, lastTapX: 0, lastTapY: 0
+};
+
+function openLightbox(url) {
+  lightbox.overlay = document.getElementById('lightboxOverlay');
+  lightbox.img = document.getElementById('lightboxImg');
+  lightbox.hint = document.getElementById('lightboxHint');
+  lightbox.img.src = url;
+  lightbox.scale = 1; lightbox.x = 0; lightbox.y = 0;
+  applyTransform();
+  lightbox.overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => { if (lightbox.hint) lightbox.hint.style.opacity = '0'; }, 2500);
+}
+
+function closeLightbox() {
+  if (!lightbox.overlay) return;
+  lightbox.overlay.classList.remove('open');
+  document.body.style.overflow = '';
+  lightbox.pointers.clear();
+  lightbox.panStart = null;
+}
+
+function applyTransform() {
+  lightbox.img.style.transform = `translate(${lightbox.x}px, ${lightbox.y}px) scale(${lightbox.scale})`;
+}
+
+function clampScale(s) { return Math.min(Math.max(s, lightbox.minScale), lightbox.maxScale); }
+
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function midpoint(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+
+function setupLightboxEvents() {
+  const overlay = document.getElementById('lightboxOverlay');
+  const img = document.getElementById('lightboxImg');
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeLightbox(); });
+
+  img.addEventListener('pointerdown', e => {
+    img.setPointerCapture(e.pointerId);
+    lightbox.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (lightbox.pointers.size === 1) {
+      // Double-tap/double-click to toggle zoom.
+      const now = Date.now();
+      const dx = Math.abs(e.clientX - lightbox.lastTapX), dy = Math.abs(e.clientY - lightbox.lastTapY);
+      if (now - lightbox.lastTapTime < 320 && dx < 30 && dy < 30) {
+        lightbox.scale = lightbox.scale > 1.01 ? 1 : 2.5;
+        if (lightbox.scale === 1) { lightbox.x = 0; lightbox.y = 0; }
+        applyTransform();
+        lightbox.lastTapTime = 0;
+        return;
+      }
+      lightbox.lastTapTime = now; lightbox.lastTapX = e.clientX; lightbox.lastTapY = e.clientY;
+
+      lightbox.panStart = { x: e.clientX, y: e.clientY, originX: lightbox.x, originY: lightbox.y };
+      img.classList.add('grabbing');
+    } else if (lightbox.pointers.size === 2) {
+      lightbox.panStart = null;
+      const pts = Array.from(lightbox.pointers.values());
+      lightbox.pinchStartDist = dist(pts[0], pts[1]);
+      lightbox.pinchStartScale = lightbox.scale;
+    }
+  });
+
+  img.addEventListener('pointermove', e => {
+    if (!lightbox.pointers.has(e.pointerId)) return;
+    lightbox.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (lightbox.pointers.size === 2) {
+      const pts = Array.from(lightbox.pointers.values());
+      const newDist = dist(pts[0], pts[1]);
+      if (lightbox.pinchStartDist > 0) {
+        lightbox.scale = clampScale(lightbox.pinchStartScale * (newDist / lightbox.pinchStartDist));
+        applyTransform();
+      }
+    } else if (lightbox.pointers.size === 1 && lightbox.panStart) {
+      lightbox.x = lightbox.panStart.originX + (e.clientX - lightbox.panStart.x);
+      lightbox.y = lightbox.panStart.originY + (e.clientY - lightbox.panStart.y);
+      applyTransform();
+    }
+  });
+
+  function endPointer(e) {
+    lightbox.pointers.delete(e.pointerId);
+    img.classList.remove('grabbing');
+    if (lightbox.pointers.size < 2) lightbox.pinchStartDist = 0;
+    if (lightbox.pointers.size === 1) {
+      const [remaining] = lightbox.pointers.values();
+      lightbox.panStart = { x: remaining.x, y: remaining.y, originX: lightbox.x, originY: lightbox.y };
+    } else if (lightbox.pointers.size === 0) {
+      lightbox.panStart = null;
+      if (lightbox.scale < 1) { lightbox.scale = 1; lightbox.x = 0; lightbox.y = 0; applyTransform(); }
+    }
+  }
+  img.addEventListener('pointerup', endPointer);
+  img.addEventListener('pointercancel', endPointer);
+
+  // Desktop: scroll wheel to zoom, centered roughly on cursor.
+  img.addEventListener('wheel', e => {
+    e.preventDefault();
+    const prevScale = lightbox.scale;
+    lightbox.scale = clampScale(lightbox.scale - e.deltaY * 0.0025);
+    const ratio = lightbox.scale / prevScale;
+    lightbox.x *= ratio; lightbox.y *= ratio;
+    applyTransform();
+  }, { passive: false });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeLightbox();
+  });
+}
+
+(async () => {
+  profile = await requireStudent();
+  if (!profile) return;
+  renderStudentNav('My Homework');
+  setupLightboxEvents();
+  load();
+})();
+</script>
+</body>
+</html>

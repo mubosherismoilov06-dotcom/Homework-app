@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leaderboard</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<style>
+.tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.tabs button { margin-top: 0; width: auto; flex: 1; padding: 10px; font-size: 14px; }
+.tabs button.inactive { background: #eef0f5; color: var(--navy-800); box-shadow: none; }
+
+.period-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.period-nav button { width: auto; margin: 0; padding: 8px 14px; font-size: 18px; }
+.period-label { font-weight: 700; color: var(--navy-800); font-size: 15px; text-align: center; flex: 1; }
+
+.row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #ece5d2; }
+.row:last-child { border-bottom: none; }
+.row.self { background: rgba(212, 175, 55, 0.12); border-radius: 10px; padding: 10px 8px; margin: 2px 0; }
+.rank { width: 30px; text-align: center; font-weight: 700; color: var(--navy-800); flex-shrink: 0; }
+.rank.medal { font-size: 18px; }
+.name-col { flex: 1; min-width: 0; }
+.name-col .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name-col .you-tag { font-size: 11px; color: var(--gold-600); font-weight: 700; margin-left: 4px; }
+.score-col { width: 54px; text-align: right; font-weight: 700; color: var(--navy-800); flex-shrink: 0; }
+.mini-bar { flex: 2; }
+
+.trend { display: flex; align-items: flex-end; gap: 4px; height: 70px; margin-top: 8px; }
+.trend .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.trend .bar { width: 100%; max-width: 22px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #40916c, #2d6a4f); min-height: 3px; }
+.trend .bar.empty { background: #e9e3d0; }
+.trend .lbl { font-size: 10px; color: #999; margin-top: 4px; }
+
+.empty-note { color: #888; text-align: center; padding: 12px 0; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/student/nav.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>🏆 Leaderboard</h1>
+
+  <div class="tabs">
+    <button id="tab-daily" onclick="setPeriod('daily')">Daily</button>
+    <button id="tab-weekly" onclick="setPeriod('weekly')">Weekly</button>
+    <button id="tab-monthly" onclick="setPeriod('monthly')">Monthly</button>
+  </div>
+
+  <div class="card">
+    <div class="period-nav">
+      <button class="secondary" onclick="shiftPeriod(-1)">‹</button>
+      <div class="period-label" id="periodLabel">Loading…</div>
+      <button class="secondary" onclick="shiftPeriod(1)">›</button>
+    </div>
+    <p style="margin:0 0 4px; color:#666; font-size:13px;" id="groupLabel"></p>
+    <div id="list"></div>
+  </div>
+
+  <div class="card" id="trendCard" style="display:none;">
+    <h2 style="margin-top:0; font-size:16px;">Your trend this period</h2>
+    <div class="trend" id="trend"></div>
+  </div>
+</div>
+<script>
+let profile;
+let period = 'daily';
+let refDate = localDateStr();
+
+function localDateStr(d = new Date()) {
+  const tz = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - tz * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function setPeriod(p) {
+  period = p;
+  ['daily', 'weekly', 'monthly'].forEach(x => {
+    document.getElementById('tab-' + x).className = x === p ? '' : 'inactive';
+  });
+  load();
+}
+
+function shiftPeriod(dir) {
+  const d = new Date(refDate + 'T00:00:00Z');
+  if (period === 'daily') d.setUTCDate(d.getUTCDate() + dir);
+  else if (period === 'weekly') d.setUTCDate(d.getUTCDate() + dir * 7);
+  else d.setUTCMonth(d.getUTCMonth() + dir);
+  refDate = d.toISOString().slice(0, 10);
+  load();
+}
+
+function formatPeriodLabel(data) {
+  const opts = { month: 'short', day: 'numeric' };
+  const s = new Date(data.startDate + 'T00:00:00Z'), e = new Date(data.endDate + 'T00:00:00Z');
+  if (period === 'daily') return s.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  if (period === 'weekly') return `${s.toLocaleDateString(undefined, { ...opts, timeZone: 'UTC' })} – ${e.toLocaleDateString(undefined, { ...opts, timeZone: 'UTC' })}`;
+  return s.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+async function load() {
+  document.getElementById('periodLabel').textContent = 'Loading…';
+  document.getElementById('list').innerHTML = '';
+  const res = await authedFetch(`/leaderboard?period=${period}&date=${refDate}`);
+  if (!res) return; // authedFetch already redirected to login
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    document.getElementById('periodLabel').textContent = '';
+    document.getElementById('list').innerHTML = `<p class="empty-note">${data.error || 'Could not load leaderboard.'}</p>`;
+    return;
+  }
+  if (data.noGroup) {
+    document.getElementById('periodLabel').textContent = '';
+    document.getElementById('list').innerHTML = `<p class="empty-note">You're not in a group yet — ask your teacher to add you to one.</p>`;
+    document.getElementById('groupLabel').textContent = '';
+    return;
+  }
+
+  document.getElementById('periodLabel').textContent = formatPeriodLabel(data);
+  document.getElementById('groupLabel').textContent = data.groupName ? `Group: ${data.groupName}` : '';
+
+  if (data.students.length === 0) {
+    document.getElementById('list').innerHTML = `<p class="empty-note">No students in your group yet.</p>`;
+    document.getElementById('trendCard').style.display = 'none';
+    return;
+  }
+
+  const medals = ['🥇', '🥈', '🥉'];
+  document.getElementById('list').innerHTML = data.students.map(s => {
+    const rankDisplay = s.rank ? (medals[s.rank - 1] || s.rank) : '—';
+    const scoreDisplay = s.score === null ? '—' : `${s.score}%`;
+    const barWidth = s.score === null ? 0 : s.score;
+    return `<div class="row ${s.isSelf ? 'self' : ''}">
+      <div class="rank ${s.rank && s.rank <= 3 ? 'medal' : ''}">${rankDisplay}</div>
+      <div class="name-col">
+        <div class="n">${escapeHtml(s.name)}${s.isSelf ? '<span class="you-tag">YOU</span>' : ''}</div>
+        <div class="progress-bar" style="height:12px; margin:4px 0 0;"><div class="progress-fill" style="width:${barWidth}%;"></div></div>
+      </div>
+      <div class="score-col">${scoreDisplay}</div>
+    </div>`;
+  }).join('');
+
+  // Trend chart for the signed-in student across this period's days.
+  const myDays = data.daily[profile.id] || [];
+  const trendCard = document.getElementById('trendCard');
+  if (myDays.length > 1) {
+    trendCard.style.display = '';
+    document.getElementById('trend').innerHTML = myDays.map(d => {
+      const h = d.score === null ? 4 : Math.max(4, Math.round(d.score * 0.66));
+      const lbl = new Date(d.date + 'T00:00:00Z').toLocaleDateString(undefined, { day: 'numeric', timeZone: 'UTC' });
+      const title = d.score === null ? 'No homework' : `${d.score}%`;
+      return `<div class="bar-wrap" title="${title}">
+        <div class="bar ${d.score === null ? 'empty' : ''}" style="height:${h}px;"></div>
+        <div class="lbl">${lbl}</div>
+      </div>`;
+    }).join('');
+  } else {
+    trendCard.style.display = 'none';
+  }
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+(async () => {
+  profile = await requireStudent();
+  if (!profile) return;
+  renderStudentNav('Leaderboard');
+  setPeriod('daily');
+})();
+</script>
+</body>
+</html>

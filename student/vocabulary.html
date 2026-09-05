@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vocabulary Homework</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/student/nav.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Loading…</h1>
+  <div class="card">
+    <p id="instructions"></p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Upload Photos</h2>
+    <p style="color:#666; font-size:14px; margin-top:-8px;">Take photos of the vocabulary work you've completed. You can select multiple photos if you have more than one page (up to 10).</p>
+    <input type="file" id="photos" accept="image/*" multiple capture="environment">
+    <button onclick="submitPhotos()" id="submitPhotosBtn">Submit Photos</button>
+    <div class="error" id="photoErr"></div>
+    <div class="success" id="photoOk"></div>
+  </div>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const hwId = params.get('id');
+let profile, hw;
+
+async function load() {
+  const { data } = await sb.from('homework').select('*').eq('id', hwId).single();
+  hw = data;
+  document.title = hw.title;
+  document.getElementById('title').textContent = '📚 ' + hw.title;
+  document.getElementById('instructions').textContent = hw.instructions || '';
+
+  const { data: photoSub } = await sb.from('submissions').select('*')
+    .eq('homework_id', hwId).eq('student_id', profile.id).eq('type', 'photo').maybeSingle();
+  if (photoSub) {
+    document.getElementById('photoOk').textContent = `✓ ${photoSub.file_path.split(',').length} photo(s) already submitted. Submitting again will replace them.`;
+  }
+}
+
+async function submitPhotos() {
+  const errEl = document.getElementById('photoErr'), okEl = document.getElementById('photoOk');
+  errEl.textContent = '';
+  const files = Array.from(document.getElementById('photos').files).slice(0, 10);
+  if (files.length === 0) { errEl.textContent = 'Please choose at least one photo.'; return; }
+
+  document.getElementById('submitPhotosBtn').disabled = true;
+  const stamp = Date.now(); // unique per submission, so a resubmit never needs
+                             // to overwrite an old path (avoids depending on
+                             // the storage UPDATE policy being in place)
+  const paths = [];
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const ext = files[i].name.split('.').pop();
+      const path = `${profile.id}/${hwId}-vocab-${stamp}-${i + 1}.${ext}`;
+      const { error: upErr } = await sb.storage.from('submissions').upload(path, files[i]);
+      if (upErr) throw upErr;
+      paths.push(path);
+    }
+  } catch (upErr) {
+    errEl.textContent = `Upload failed (${upErr.message || 'connection issue'}) — please try again.`;
+    document.getElementById('submitPhotosBtn').disabled = false;
+    return;
+  }
+
+  const { data: existing } = await sb.from('submissions').select('id')
+    .eq('homework_id', hwId).eq('student_id', profile.id).eq('type', 'photo').maybeSingle();
+  const result = existing
+    ? await sb.from('submissions').update({ file_path: paths.join(','), submitted_at: new Date().toISOString() }).eq('id', existing.id)
+    : await sb.from('submissions').insert({ homework_id: hwId, student_id: profile.id, type: 'photo', file_path: paths.join(',') });
+  document.getElementById('submitPhotosBtn').disabled = false;
+  if (result.error) {
+    // The photos are already safely uploaded to storage at this point
+    // (paths above) — only the database record failed — but don't tell the
+    // student it worked when their teacher won't actually see it.
+    errEl.textContent = `Your photos uploaded but saving the submission failed: ${result.error.message}. Please try Submit again.`;
+    return;
+  }
+  okEl.textContent = `✓ ${paths.length} photo(s) submitted!`;
+}
+
+(async () => {
+  profile = await requireStudent();
+  if (!profile) return;
+  renderStudentNav('My Homework');
+  load();
+})();
+</script>
+</body>
+</html>
