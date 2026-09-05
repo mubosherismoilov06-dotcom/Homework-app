@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leaderboard — Homework System</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<style>
+.tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.tabs button { margin-top: 0; width: auto; flex: 1; padding: 10px; font-size: 14px; }
+.tabs button.inactive { background: #eef0f5; color: var(--navy-800); box-shadow: none; }
+
+.period-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.period-nav button { width: auto; margin: 0; padding: 8px 14px; font-size: 18px; }
+.period-label { font-weight: 700; color: var(--navy-800); font-size: 15px; text-align: center; flex: 1; }
+
+.row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #ece5d2; }
+.row:last-child { border-bottom: none; }
+.rank { width: 30px; text-align: center; font-weight: 700; color: var(--navy-800); flex-shrink: 0; }
+.rank.medal { font-size: 18px; }
+.name-col { flex: 1; min-width: 0; }
+.name-col .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.score-col { width: 54px; text-align: right; font-weight: 700; color: var(--navy-800); flex-shrink: 0; }
+.empty-note { color: #888; text-align: center; padding: 12px 0; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/teacher/nav.js"></script>
+</head>
+<body>
+<div class="wrap-wide">
+  <h1>🏆 Leaderboard</h1>
+
+  <div class="card">
+    <label>Group</label>
+    <select id="groupSelect" onchange="onGroupChange()"></select>
+  </div>
+
+  <div class="tabs">
+    <button id="tab-daily" onclick="setPeriod('daily')">Daily</button>
+    <button id="tab-weekly" onclick="setPeriod('weekly')">Weekly</button>
+    <button id="tab-monthly" onclick="setPeriod('monthly')">Monthly</button>
+  </div>
+
+  <div class="card">
+    <div class="period-nav">
+      <button class="secondary" onclick="shiftPeriod(-1)">‹</button>
+      <div class="period-label" id="periodLabel">Loading…</div>
+      <button class="secondary" onclick="shiftPeriod(1)">›</button>
+    </div>
+    <div id="list"></div>
+  </div>
+</div>
+<script>
+let profile;
+let period = 'daily';
+let refDate = localDateStr();
+let groups = [];
+let currentGroupId = null;
+
+function localDateStr(d = new Date()) {
+  const tz = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - tz * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+async function loadGroups() {
+  const { data } = await sb.from('groups').select('*').order('name');
+  groups = data || [];
+  const sel = document.getElementById('groupSelect');
+  if (groups.length === 0) {
+    sel.innerHTML = '<option value="">No groups yet</option>';
+    document.getElementById('list').innerHTML = '<p class="empty-note">Create a group on the Students page first.</p>';
+    document.getElementById('periodLabel').textContent = '';
+    return;
+  }
+  sel.innerHTML = groups.map(g => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
+  currentGroupId = groups[0].id;
+  sel.value = currentGroupId;
+}
+
+function onGroupChange() {
+  currentGroupId = document.getElementById('groupSelect').value;
+  load();
+}
+
+function setPeriod(p) {
+  period = p;
+  ['daily', 'weekly', 'monthly'].forEach(x => {
+    document.getElementById('tab-' + x).className = x === p ? '' : 'inactive';
+  });
+  load();
+}
+
+function shiftPeriod(dir) {
+  const d = new Date(refDate + 'T00:00:00Z');
+  if (period === 'daily') d.setUTCDate(d.getUTCDate() + dir);
+  else if (period === 'weekly') d.setUTCDate(d.getUTCDate() + dir * 7);
+  else d.setUTCMonth(d.getUTCMonth() + dir);
+  refDate = d.toISOString().slice(0, 10);
+  load();
+}
+
+function formatPeriodLabel(data) {
+  const opts = { month: 'short', day: 'numeric' };
+  const s = new Date(data.startDate + 'T00:00:00Z'), e = new Date(data.endDate + 'T00:00:00Z');
+  if (period === 'daily') return s.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  if (period === 'weekly') return `${s.toLocaleDateString(undefined, { ...opts, timeZone: 'UTC' })} – ${e.toLocaleDateString(undefined, { ...opts, timeZone: 'UTC' })}`;
+  return s.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+async function load() {
+  if (!currentGroupId) return;
+  document.getElementById('periodLabel').textContent = 'Loading…';
+  document.getElementById('list').innerHTML = '';
+  const res = await authedFetch(`/leaderboard?period=${period}&date=${refDate}&group_id=${currentGroupId}`);
+  if (!res) return; // authedFetch already redirected to login
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    document.getElementById('periodLabel').textContent = '';
+    document.getElementById('list').innerHTML = `<p class="empty-note">${data.error || 'Could not load leaderboard.'}</p>`;
+    return;
+  }
+
+  document.getElementById('periodLabel').textContent = formatPeriodLabel(data);
+
+  if (data.students.length === 0) {
+    document.getElementById('list').innerHTML = `<p class="empty-note">No students in this group yet.</p>`;
+    return;
+  }
+
+  const medals = ['🥇', '🥈', '🥉'];
+  document.getElementById('list').innerHTML = data.students.map(s => {
+    const rankDisplay = s.rank ? (medals[s.rank - 1] || s.rank) : '—';
+    const scoreDisplay = s.score === null ? '—' : `${s.score}%`;
+    const barWidth = s.score === null ? 0 : s.score;
+    return `<div class="row">
+      <div class="rank ${s.rank && s.rank <= 3 ? 'medal' : ''}">${rankDisplay}</div>
+      <div class="name-col">
+        <div class="n">${escapeHtml(s.name)}</div>
+        <div class="progress-bar" style="height:12px; margin:4px 0 0;"><div class="progress-fill" style="width:${barWidth}%;"></div></div>
+      </div>
+      <div class="score-col">${scoreDisplay}</div>
+    </div>`;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+(async () => {
+  profile = await requireTeacher();
+  if (!profile) return;
+  renderTeacherNav('Leaderboard');
+  await loadGroups();
+  setPeriod('daily');
+})();
+</script>
+</body>
+</html>

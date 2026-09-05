@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Homework — Homework System</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/teacher/nav.js"></script>
+</head>
+<body>
+<div class="wrap-wide">
+  <h1>Homework</h1>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Create Homework</h2>
+    <label>Type</label>
+    <select id="type" onchange="onTypeChange()">
+      <option value="listening">🎧 Listening Homework</option>
+      <option value="reading">🎤 Reading / Retelling Homework</option>
+      <option value="chatgpt">💬 ChatGPT Chat Homework</option>
+      <option value="vocabulary">📚 Vocabulary Homework</option>
+      <option value="grammar">✏️ Grammar Homework</option>
+    </select>
+
+    <label>Homework name</label>
+    <input type="text" id="title" placeholder="e.g. Listening Unit 4">
+
+    <label>Instructions</label>
+    <textarea id="instructions" placeholder="e.g. Listen carefully and write down everything you hear."></textarea>
+
+    <div id="listeningFields">
+      <label>Audio file</label>
+      <input type="file" id="audioFile" accept="audio/*">
+      <label>Total required listens</label>
+      <p style="color:#666; font-size:14px; margin:0 0 6px;">How many times a student must listen in total before the deadline — no daily split, they can listen whenever they're free.</p>
+      <input type="number" id="totalRequiredListens" value="30" min="1">
+      <label><input type="checkbox" id="requirePhoto" checked style="width:auto; margin-right:6px;"> Require transcription photo</label>
+      <label>Lyrics / transcript</label>
+      <p style="color:#666; font-size:14px; margin:0 0 6px;">Shown to students automatically right after they submit their transcription photo.</p>
+      <textarea id="lyrics" placeholder="Paste the full lyrics or transcript of the audio here."></textarea>
+    </div>
+
+    <div id="readingFields" style="display:none;">
+      <p style="color:#666; font-size:14px; margin:0 0 6px;">Students get two recording panels: one for reading the passage aloud, one for retelling it from memory. Both are record-only (no file upload) and every take is saved and counted.</p>
+      <label>Required reading recordings</label>
+      <p style="color:#666; font-size:14px; margin:0 0 6px;">How many times the student must record themselves reading the passage aloud and send it in. Shown to students as a progress goal (retelling recordings are unlimited and have no set requirement).</p>
+      <input type="number" id="readingRecordingsRequired" value="1" min="1">
+      <label>Reading material / instructions for students</label>
+      <textarea id="readingMaterial" placeholder="Paste the passage here, or instructions for what to retell."></textarea>
+      <label>Or upload the passage as a file</label>
+      <p style="color:#666; font-size:14px; margin:0 0 6px;">A photo/scan or PDF of the passage. Shown to students alongside (or instead of) the text above.</p>
+      <input type="file" id="readingMaterialFile" accept="image/*,.pdf">
+    </div>
+
+    <div id="chatgptFields" style="display:none;">
+      <p style="color:#666; font-size:14px; margin:0;">Use the "Instructions" box above to tell students exactly what to ask ChatGPT / what task to complete. Students will submit their chat as pasted text and/or photos — no extra fields needed here.</p>
+    </div>
+
+    <div id="vocabularyFields" style="display:none;">
+      <p style="color:#666; font-size:14px; margin:0;">Use the "Instructions" box above to tell students which vocabulary to work on. Students will submit one or more photos of their completed work — no extra fields needed here.</p>
+    </div>
+
+    <div id="grammarFields" style="display:none;">
+      <p style="color:#666; font-size:14px; margin:0;">Use the "Instructions" box above to tell students which grammar exercises to complete. Students will submit one or more photos of their completed work — no extra fields needed here.</p>
+    </div>
+
+    <label>Start date</label>
+    <input type="date" id="startDate">
+    <label>Deadline</label>
+    <input type="date" id="deadline">
+
+    <label>Assign to</label>
+    <select id="assignMode" onchange="onAssignModeChange()">
+      <option value="all">All active students</option>
+    </select>
+    <p id="groupPickNote" style="display:none; color:#666; font-size:14px; margin:6px 0 0;"></p>
+
+    <button onclick="createHomework()" id="createBtn">Create Homework</button>
+    <div class="error" id="err"></div>
+    <div class="success" id="ok"></div>
+  </div>
+
+  <h2>Existing Homework</h2>
+  <div id="list">Loading…</div>
+</div>
+<script>
+let profile;
+
+function onTypeChange() {
+  const type = document.getElementById('type').value;
+  document.getElementById('listeningFields').style.display = type === 'listening' ? '' : 'none';
+  document.getElementById('readingFields').style.display = type === 'reading' ? '' : 'none';
+  document.getElementById('chatgptFields').style.display = type === 'chatgpt' ? '' : 'none';
+  document.getElementById('vocabularyFields').style.display = type === 'vocabulary' ? '' : 'none';
+  document.getElementById('grammarFields').style.display = type === 'grammar' ? '' : 'none';
+}
+function onAssignModeChange() {
+  const mode = document.getElementById('assignMode').value;
+  const noteEl = document.getElementById('groupPickNote');
+  if (mode !== 'all') {
+    const opt = document.querySelector(`#assignMode option[value="${mode}"]`);
+    noteEl.textContent = `Will assign to every active student currently in "${opt ? opt.textContent : 'this group'}".`;
+    noteEl.style.display = '';
+  } else {
+    noteEl.style.display = 'none';
+  }
+}
+
+async function loadGroupOptions() {
+  const { data: groups } = await sb.from('groups').select('id,name').eq('teacher_id', profile.id).order('name');
+  const el = document.getElementById('assignMode');
+  (groups || []).forEach(g => {
+    const opt = document.createElement('option');
+    opt.value = g.id;
+    opt.textContent = g.name;
+    el.appendChild(opt);
+  });
+}
+
+async function createHomework() {
+  const errEl = document.getElementById('err'), okEl = document.getElementById('ok');
+  errEl.textContent = ''; okEl.textContent = '';
+  const type = document.getElementById('type').value;
+  const title = document.getElementById('title').value.trim();
+  const instructions = document.getElementById('instructions').value.trim();
+  const startDate = document.getElementById('startDate').value;
+  const deadline = document.getElementById('deadline').value;
+  if (!title || !startDate || !deadline) { errEl.textContent = 'Please fill in name, start date, and deadline.'; return; }
+  if (deadline < startDate) { errEl.textContent = 'Deadline cannot be before the start date.'; return; }
+
+  document.getElementById('createBtn').disabled = true;
+  try {
+    let audio_file_path = null;
+    let listens_per_day = null, number_of_days = null, total_required_listens = null, require_photo = null;
+    let lyrics = null;
+    let reading_material = null, reading_material_file_path = null, reading_recordings_required = null;
+
+    if (type === 'listening') {
+      const file = document.getElementById('audioFile').files[0];
+      if (!file) { errEl.textContent = 'Please choose an audio file.'; document.getElementById('createBtn').disabled = false; return; }
+      const path = `${crypto.randomUUID()}-${file.name}`;
+      const { error: upErr } = await sb.storage.from('homework-audio').upload(path, file);
+      if (upErr) { errEl.textContent = 'Audio upload failed: ' + upErr.message; document.getElementById('createBtn').disabled = false; return; }
+      audio_file_path = path;
+      total_required_listens = parseInt(document.getElementById('totalRequiredListens').value) || 1;
+      listens_per_day = total_required_listens; // kept in sync for older code paths that still read this field
+      number_of_days = null;
+      require_photo = document.getElementById('requirePhoto').checked;
+      lyrics = document.getElementById('lyrics').value.trim();
+    } else if (type === 'reading') {
+      reading_recordings_required = parseInt(document.getElementById('readingRecordingsRequired').value) || 1;
+      reading_material = document.getElementById('readingMaterial').value.trim();
+      const materialFile = document.getElementById('readingMaterialFile').files[0];
+      if (materialFile) {
+        const matPath = `${crypto.randomUUID()}-${materialFile.name}`;
+        const { error: matErr } = await sb.storage.from('homework-materials').upload(matPath, materialFile);
+        if (matErr) { errEl.textContent = 'Passage file upload failed: ' + matErr.message; document.getElementById('createBtn').disabled = false; return; }
+        reading_material_file_path = matPath;
+      }
+    }
+
+    const { data: hw, error: hwErr } = await sb.from('homework').insert({
+      teacher_id: profile.id, title, type, instructions,
+      audio_file_path, reading_material, reading_material_file_path, reading_recordings_required, listens_per_day, number_of_days,
+      total_required_listens, require_photo, lyrics, start_date: startDate, deadline
+    }).select().single();
+    if (hwErr) { errEl.textContent = hwErr.message; document.getElementById('createBtn').disabled = false; return; }
+
+    let studentIds;
+    const assignMode = document.getElementById('assignMode').value;
+    if (assignMode === 'all') {
+      const { data: all } = await sb.from('profiles').select('id').eq('role','student').eq('active', true);
+      studentIds = (all || []).map(s => s.id);
+    } else {
+      const { data: groupStudents } = await sb.from('profiles').select('id').eq('role','student').eq('active', true).eq('group_id', assignMode);
+      studentIds = (groupStudents || []).map(s => s.id);
+    }
+    if (studentIds.length > 0) {
+      await sb.from('homework_assignments').insert(studentIds.map(id => ({ homework_id: hw.id, student_id: id })));
+    }
+
+    okEl.textContent = 'Homework created!';
+    setTimeout(() => window.location.href = `/teacher/homework-view.html?id=${hw.id}`, 800);
+  } finally {
+    document.getElementById('createBtn').disabled = false;
+  }
+}
+
+async function loadList() {
+  const { data: hws } = await sb.from('homework').select('*').eq('archived', false).order('created_at', { ascending: false });
+  const el = document.getElementById('list');
+  if (!hws || hws.length === 0) { el.innerHTML = '<div class="card">No homework yet.</div>'; return; }
+  el.innerHTML = hws.map(h => `
+    <div class="card">
+      <b>${h.type === 'listening' ? '🎧' : h.type === 'reading' ? '🎤' : h.type === 'vocabulary' ? '📚' : h.type === 'grammar' ? '✏️' : '💬'} ${escapeHtml(h.title)}</b><br>
+      <span style="color:#666; font-size:14px;">Deadline: ${h.deadline}</span><br>
+      <a class="link" href="/teacher/homework-view.html?id=${h.id}">View progress / edit →</a>
+    </div>`).join('');
+}
+
+function escapeHtml(s) { return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+(async () => {
+  profile = await requireTeacher();
+  if (!profile) return;
+  renderTeacherNav('Homework');
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('startDate').value = today;
+  loadGroupOptions();
+  loadList();
+})();
+</script>
+</body>
+</html>

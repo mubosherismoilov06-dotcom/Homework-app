@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Groups — Homework System</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/teacher/nav.js"></script>
+</head>
+<body>
+<div class="wrap-wide">
+  <h1 id="title">Groups</h1>
+  <div id="groupCards">Loading…</div>
+
+  <div id="detailSection" style="display:none;">
+    <button class="secondary" style="width:auto;" onclick="showGroupList()">← Back to all groups</button>
+    <h2 id="detailTitle" style="margin:12px 0 4px;"></h2>
+    <p style="color:#666; font-size:14px; margin:0 0 12px;">
+      Totals are added up across every homework of that kind assigned to the student (active and archived). Tap any number to see the breakdown.
+    </p>
+    <div id="detailTable">Loading…</div>
+  </div>
+</div>
+
+<div class="card" id="viewer" style="display:none; max-width:900px; margin:16px auto;"></div>
+
+<script>
+let groups = [], allStudents = [];
+
+async function loadGroupList() {
+  const [{ data: g }, { data: s }] = await Promise.all([
+    sb.from('groups').select('*').order('name'),
+    sb.from('profiles').select('id,name,active,group_id').eq('role', 'student')
+  ]);
+  groups = g || [];
+  allStudents = s || [];
+  renderGroupCards();
+}
+
+function renderGroupCards() {
+  const el = document.getElementById('groupCards');
+  if (groups.length === 0) {
+    el.innerHTML = '<div class="card">No groups yet. Create one from the <a class="link" href="/teacher/students.html">Students</a> page.</div>';
+    return;
+  }
+  el.innerHTML = groups.map(g => {
+    const members = allStudents.filter(s => s.group_id === g.id);
+    const activeCount = members.filter(s => s.active).length;
+    return `<div class="card" style="cursor:pointer;" onclick="openGroup('${g.id}')">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <h3 style="margin:0;">${escapeHtml(g.name)}</h3>
+        <span class="link">View chart →</span>
+      </div>
+      <p style="color:#666; margin:6px 0 0;">${members.length} student${members.length === 1 ? '' : 's'}${activeCount !== members.length ? ` (${activeCount} active)` : ''}</p>
+    </div>`;
+  }).join('');
+}
+
+function showGroupList() {
+  document.getElementById('detailSection').style.display = 'none';
+  document.getElementById('groupCards').style.display = '';
+  document.getElementById('viewer').style.display = 'none';
+  history.replaceState(null, '', '/teacher/groups.html');
+}
+
+async function openGroup(groupId) {
+  const group = groups.find(g => g.id === groupId);
+  if (!group) return;
+  document.getElementById('groupCards').style.display = 'none';
+  document.getElementById('detailSection').style.display = '';
+  document.getElementById('detailTitle').textContent = `📊 ${group.name}`;
+  document.getElementById('detailTable').innerHTML = 'Loading…';
+  history.replaceState(null, '', `/teacher/groups.html?id=${groupId}`);
+
+  const members = allStudents.filter(s => s.group_id === groupId).sort((a, b) => a.name.localeCompare(b.name));
+  if (members.length === 0) {
+    document.getElementById('detailTable').innerHTML = '<div class="card">No students in this group yet.</div>';
+    return;
+  }
+  await renderGroupChart(members);
+}
+
+// Everything below is fetched as a handful of PARALLEL, batched queries
+// (one query per data type covering ALL members at once) instead of
+// looping per-student — that's what keeps this page fast even for a
+// large group.
+async function renderGroupChart(members) {
+  const ids = members.map(m => m.id);
+
+  const [
+    { data: assignments },
+    { data: listeningProgress },
+    { data: photoSubs },
+    { data: readingSubs },
+    { data: retellingSubs },
+    { data: chatTextSubs },
+    { data: chatPhotoSubs }
+  ] = await Promise.all([
+    sb.from('homework_assignments').select('student_id, homework:homework_id(id,type,require_photo)').in('student_id', ids),
+    sb.from('listening_progress').select('student_id, completed_listens').in('student_id', ids),
+    sb.from('submissions').select('student_id, homework_id').eq('type', 'photo').in('student_id', ids),
+    sb.from('submissions').select('student_id, homework_id').eq('type', 'reading_audio').in('student_id', ids),
+    sb.from('submissions').select('student_id, homework_id').eq('type', 'retelling_audio').in('student_id', ids),
+    sb.from('submissions').select('student_id, homework_id').eq('type', 'chat_text').in('student_id', ids),
+    sb.from('submissions').select('student_id, homework_id').eq('type', 'chat_photo').in('student_id', ids)
+  ]);
+
+  const rows = members.map(s => {
+    const myAssignments = (assignments || []).filter(a => a.student_id === s.id && a.homework);
+    const listeningHw = myAssignments.filter(a => a.homework.type === 'listening');
+    const readingHw = myAssignments.filter(a => a.homework.type === 'reading');
+    const chatgptHw = myAssignments.filter(a => a.homework.type === 'chatgpt');
+    const vocabularyHw = myAssignments.filter(a => a.homework.type === 'vocabulary');
+    const grammarHw = myAssignments.filter(a => a.homework.type === 'grammar');
+    const photoRequiredHw = listeningHw.filter(a => a.homework.require_photo);
+
+    const totalListens = (listeningProgress || [])
+      .filter(p => p.student_id === s.id).reduce((sum, p) => sum + p.completed_listens, 0);
+    const photoCount = (photoSubs || []).filter(p => p.student_id === s.id &&
+      photoRequiredHw.some(a => a.homework.id === p.homework_id)).length;
+    const readingCount = (readingSubs || []).filter(p => p.student_id === s.id).length;
+    const retellingCount = (retellingSubs || []).filter(p => p.student_id === s.id).length;
+    const chatCount = new Set([
+      ...(chatTextSubs || []).filter(p => p.student_id === s.id).map(p => p.homework_id),
+      ...(chatPhotoSubs || []).filter(p => p.student_id === s.id).map(p => p.homework_id)
+    ]).size;
+    const vocabularyCount = (photoSubs || []).filter(p => p.student_id === s.id &&
+      vocabularyHw.some(a => a.homework.id === p.homework_id)).length;
+    const grammarCount = (photoSubs || []).filter(p => p.student_id === s.id &&
+      grammarHw.some(a => a.homework.id === p.homework_id)).length;
+
+    return { student: s, listeningHwCount: listeningHw.length, totalListens,
+      photoRequiredCount: photoRequiredHw.length, photoCount,
+      readingHwCount: readingHw.length, readingCount, retellingCount,
+      chatgptHwCount: chatgptHw.length, chatCount,
+      vocabularyHwCount: vocabularyHw.length, vocabularyCount,
+      grammarHwCount: grammarHw.length, grammarCount };
+  });
+
+  const html = `<div class="card" style="overflow-x:auto;">
+    <table>
+      <tr>
+        <th>Student</th>
+        <th>🎧 Listens</th>
+        <th>📷 Listening Photos</th>
+        <th>🎤 Reading Recordings</th>
+        <th>🗣 Retelling Recordings</th>
+        <th>💬 ChatGPT</th>
+        <th>📚 Vocabulary</th>
+        <th>✏️ Grammar</th>
+      </tr>
+      ${rows.map(r => `<tr>
+        <td><a class="link" href="/teacher/student-progress.html?id=${r.student.id}">${escapeHtml(r.student.name)}</a>${r.student.active ? '' : ' <span style="color:#999; font-size:12px;">(inactive)</span>'}</td>
+        <td>${r.listeningHwCount ? `${r.totalListens} total` : '—'}</td>
+        <td>${r.photoRequiredCount ? `${r.photoCount}/${r.photoRequiredCount}` : '—'}</td>
+        <td>${r.readingHwCount ? `${r.readingCount} recording${r.readingCount === 1 ? '' : 's'}` : '—'}</td>
+        <td>${r.readingHwCount ? `${r.retellingCount} recording${r.retellingCount === 1 ? '' : 's'}` : '—'}</td>
+        <td>${r.chatgptHwCount ? `${r.chatCount}/${r.chatgptHwCount}` : '—'}</td>
+        <td>${r.vocabularyHwCount ? `${r.vocabularyCount}/${r.vocabularyHwCount}` : '—'}</td>
+        <td>${r.grammarHwCount ? `${r.grammarCount}/${r.grammarHwCount}` : '—'}</td>
+      </tr>`).join('')}
+    </table>
+  </div>`;
+  document.getElementById('detailTable').innerHTML = html;
+}
+
+function escapeHtml(s) { return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+(async () => {
+  const profile = await requireTeacher();
+  if (!profile) return;
+  renderTeacherNav('Groups');
+  await loadGroupList();
+  const params = new URLSearchParams(location.search);
+  const preId = params.get('id');
+  if (preId) openGroup(preId);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard — Homework System</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/teacher/nav.js"></script>
+</head>
+<body>
+<div class="wrap-wide">
+  <h1>My Homework</h1>
+  <div id="list">Loading…</div>
+</div>
+<script>
+(async () => {
+  const profile = await requireTeacher();
+  if (!profile) return;
+  renderTeacherNav('Dashboard');
+
+  const { data: assignments } = await sb.from('homework')
+    .select('*').eq('archived', false).order('created_at', { ascending: false });
+
+  const listEl = document.getElementById('list');
+  if (!assignments || assignments.length === 0) {
+    listEl.innerHTML = `<div class="card">No homework yet. <a class="link" href="/teacher/homework.html">Create your first homework</a>.</div>`;
+    return;
+  }
+
+  let html = '';
+  for (const hw of assignments) {
+    const { count: totalStudents } = await sb.from('homework_assignments')
+      .select('*', { count: 'exact', head: true }).eq('homework_id', hw.id);
+
+    if (hw.type === 'listening') {
+      // Cumulative across the whole assignment window (no daily quota) —
+      // count students whose summed completed_listens has reached the
+      // homework's required total, rather than looking at "today" alone.
+      const required = hw.total_required_listens || hw.listens_per_day || 0;
+      const { data: rows } = await sb.from('listening_progress')
+        .select('student_id, completed_listens').eq('homework_id', hw.id);
+      const totalsByStudent = {};
+      (rows || []).forEach(r => { totalsByStudent[r.student_id] = (totalsByStudent[r.student_id] || 0) + r.completed_listens; });
+      const doneCount = Object.values(totalsByStudent).filter(t => required > 0 && t >= required).length;
+      html += `<div class="card">
+        <b>🎧 ${escapeHtml(hw.title)}</b><br>
+        ${doneCount}/${totalStudents || 0} students have completed their required listens<br>
+        <a class="link" href="/teacher/homework-view.html?id=${hw.id}">View details →</a>
+      </div>`;
+    } else if (hw.type === 'reading') {
+      const { count: readingCount } = await sb.from('submissions')
+        .select('*', { count: 'exact', head: true }).eq('homework_id', hw.id).eq('type', 'reading_audio');
+      const { count: retellingCount } = await sb.from('submissions')
+        .select('*', { count: 'exact', head: true }).eq('homework_id', hw.id).eq('type', 'retelling_audio');
+      html += `<div class="card">
+        <b>🎤 ${escapeHtml(hw.title)}</b><br>
+        ${readingCount || 0} reading recordings &nbsp; ${retellingCount || 0} retelling recordings &nbsp; (${totalStudents || 0} students assigned)<br>
+        <a class="link" href="/teacher/homework-view.html?id=${hw.id}">View details →</a>
+      </div>`;
+    } else if (hw.type === 'vocabulary' || hw.type === 'grammar') {
+      const { count: submitted } = await sb.from('submissions')
+        .select('*', { count: 'exact', head: true }).eq('homework_id', hw.id).eq('type', 'photo');
+      const icon = hw.type === 'vocabulary' ? '📚' : '✏️';
+      html += `<div class="card">
+        <b>${icon} ${escapeHtml(hw.title)}</b><br>
+        ${submitted || 0}/${totalStudents || 0} students submitted<br>
+        <a class="link" href="/teacher/homework-view.html?id=${hw.id}">View details →</a>
+      </div>`;
+    } else {
+      const { count: submitted } = await sb.from('submissions')
+        .select('*', { count: 'exact', head: true }).eq('homework_id', hw.id).in('type', ['chat_text','chat_photo']);
+      html += `<div class="card">
+        <b>💬 ${escapeHtml(hw.title)}</b><br>
+        ${submitted || 0}/${totalStudents || 0} students submitted<br>
+        <a class="link" href="/teacher/homework-view.html?id=${hw.id}">View details →</a>
+      </div>`;
+    }
+  }
+  listEl.innerHTML = html;
+})();
+
+function escapeHtml(s) { return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Students — Homework System</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/teacher/nav.js"></script>
+</head>
+<body>
+<div class="wrap-wide">
+  <h1>Students</h1>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Groups</h2>
+    <p style="color:#666; font-size:14px; margin:0 0 8px;">Create groups (e.g. "Heist", "Group A") to sort your students into. You can move any student — new or existing — into any group at any time.</p>
+    <div id="groupList" style="margin-bottom:10px;"></div>
+    <label>New group name</label>
+    <input type="text" id="newGroupName" placeholder="e.g. Heist">
+    <button onclick="addGroup()">Add Group</button>
+    <div class="error" id="groupErr"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Add a Student</h2>
+    <label>Student name</label>
+    <input type="text" id="name">
+    <label>Username (student logs in with this)</label>
+    <input type="text" id="username" autocapitalize="off">
+    <label>Password</label>
+    <input type="text" id="password" placeholder="e.g. a simple password you give them">
+    <label>Student ID (optional)</label>
+    <input type="text" id="student_id_number">
+    <label>Group</label>
+    <select id="groupSelect"></select>
+    <button onclick="addStudent()">Add Student</button>
+    <div class="error" id="addErr"></div>
+    <div class="success" id="addOk"></div>
+  </div>
+
+  <h2>All Students</h2>
+  <div id="list">Loading…</div>
+</div>
+<script>
+let session;
+let groups = [];
+let students = [];
+
+// ---------- Groups ----------
+
+async function loadGroups() {
+  const { data } = await sb.from('groups').select('*').order('name');
+  groups = data || [];
+}
+
+function groupOptionsHtml(selectedId) {
+  let opts = `<option value="" ${!selectedId ? 'selected' : ''}>No group</option>`;
+  opts += groups.map(g =>
+    `<option value="${g.id}" ${selectedId === g.id ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
+  ).join('');
+  return opts;
+}
+
+function renderGroupPickerForAddForm() {
+  document.getElementById('groupSelect').innerHTML = groupOptionsHtml(null);
+}
+
+function renderGroupList() {
+  const el = document.getElementById('groupList');
+  if (groups.length === 0) { el.innerHTML = '<p style="color:#666; margin:0;">No groups yet — add one below.</p>'; return; }
+  el.innerHTML = groups.map(g => {
+    const count = students.filter(s => s.group_id === g.id).length;
+    return `
+    <div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #eee;">
+      <span style="flex:1; font-weight:600;">${escapeHtml(g.name)}</span>
+      <span style="color:#666; font-size:14px;">${count} student${count === 1 ? '' : 's'}</span>
+      <a class="link" style="white-space:nowrap;" href="/teacher/groups.html?id=${g.id}">View chart</a>
+      <button class="secondary" style="width:auto; margin:0; padding:6px 10px;" onclick="renameGroup('${g.id}', '${escapeHtml(g.name).replace(/'/g, "\\'")}')">Rename</button>
+      <button class="danger" style="width:auto; margin:0; padding:6px 10px;" onclick="deleteGroup('${g.id}', '${escapeHtml(g.name).replace(/'/g, "\\'")}')">Delete</button>
+    </div>`;
+  }).join('');
+}
+
+async function addGroup() {
+  const errEl = document.getElementById('groupErr');
+  errEl.textContent = '';
+  const nameEl = document.getElementById('newGroupName');
+  const name = nameEl.value.trim();
+  if (!name) { errEl.textContent = 'Please enter a group name.'; return; }
+  const { error } = await sb.from('groups').insert({ teacher_id: session.user.id, name });
+  if (error) { errEl.textContent = error.message; return; }
+  nameEl.value = '';
+  await loadGroups();
+  renderGroupPickerForAddForm();
+  await loadStudents();
+}
+
+async function renameGroup(id, currentName) {
+  const name = prompt('Rename group:', currentName);
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === currentName) return;
+  await sb.from('groups').update({ name: trimmed }).eq('id', id);
+  await loadGroups();
+  renderGroupPickerForAddForm();
+  await loadStudents();
+}
+
+async function deleteGroup(id, name) {
+  if (!confirm(`Delete the group "${name}"? Students in it will not be deleted — they'll just become ungrouped.`)) return;
+  await sb.from('groups').delete().eq('id', id);
+  await loadGroups();
+  renderGroupPickerForAddForm();
+  await loadStudents();
+}
+
+// ---------- Students ----------
+
+async function addStudent() {
+  const errEl = document.getElementById('addErr'), okEl = document.getElementById('addOk');
+  errEl.textContent = ''; okEl.textContent = '';
+  const name = document.getElementById('name').value.trim();
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const student_id_number = document.getElementById('student_id_number').value.trim();
+  const group_id = document.getElementById('groupSelect').value || null;
+  if (!name || !username || !password) { errEl.textContent = 'Please fill in name, username, and password.'; return; }
+
+  const res = await authedFetch('/create-student', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, username, password, student_id_number })
+  });
+  if (!res) return; // authedFetch already redirected to login
+  const result = await res.json();
+  if (!res.ok) { errEl.textContent = result.error || 'Could not add student.'; return; }
+
+  if (group_id) {
+    await sb.from('profiles').update({ group_id }).eq('id', result.id);
+  }
+
+  okEl.textContent = `${name} added! Give them the username "${username}" and their password.`;
+  document.getElementById('name').value = '';
+  document.getElementById('username').value = '';
+  document.getElementById('password').value = '';
+  document.getElementById('student_id_number').value = '';
+  document.getElementById('groupSelect').value = '';
+  loadStudents();
+}
+
+async function toggleActive(id, current) {
+  await sb.from('profiles').update({ active: !current }).eq('id', id);
+  loadStudents();
+}
+
+async function reassignStudent(selectEl, id) {
+  const group_id = selectEl.value || null;
+  await sb.from('profiles').update({ group_id }).eq('id', id);
+  loadStudents();
+}
+
+async function deleteStudent(id, name) {
+  if (!confirm(`Delete ${name}? This permanently removes their account, homework, and submissions. This cannot be undone.`)) return;
+  const res = await authedFetch('/delete-student', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ student_id: id })
+  });
+  if (!res) return; // authedFetch already redirected to login
+  const result = await res.json();
+  if (!res.ok) { alert(result.error || 'Could not delete student.'); return; }
+  loadStudents();
+}
+
+function studentRowHtml(s) {
+  return `
+    <tr>
+      <td>${escapeHtml(s.name)}</td>
+      <td>${escapeHtml(s.username)}</td>
+      <td><span class="badge ${s.active ? 'done' : 'none'}">${s.active ? 'Active' : 'Inactive'}</span></td>
+      <td style="min-width:140px;">
+        <select onchange="reassignStudent(this, '${s.id}')">${groupOptionsHtml(s.group_id)}</select>
+      </td>
+      <td><a class="link" href="/teacher/student-progress.html?id=${s.id}">Progress</a></td>
+      <td><button class="secondary" style="width:auto; margin:0; padding:8px 12px;" onclick="toggleActive('${s.id}', ${s.active})">${s.active ? 'Deactivate' : 'Activate'}</button></td>
+      <td><button class="danger" style="width:auto; margin:0; padding:8px 12px;" onclick="deleteStudent('${s.id}', '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Delete</button></td>
+    </tr>`;
+}
+
+function studentsTableHtml(list) {
+  if (list.length === 0) return '<p style="color:#666; margin:0;">No students here.</p>';
+  return `<table><tr><th>Name</th><th>Username</th><th>Status</th><th>Group</th><th></th><th></th><th></th></tr>${list.map(studentRowHtml).join('')}</table>`;
+}
+
+async function loadStudents() {
+  const { data } = await sb.from('profiles').select('*').eq('role', 'student').order('name');
+  students = data || [];
+  const listEl = document.getElementById('list');
+  if (students.length === 0) { listEl.innerHTML = '<div class="card">No students added yet.</div>'; renderGroupList(); return; }
+
+  let html = '';
+  groups.forEach(g => {
+    const inGroup = students.filter(s => s.group_id === g.id);
+    if (inGroup.length === 0) return;
+    html += `<div class="card"><h3 style="margin-top:0;">${escapeHtml(g.name)}</h3>${studentsTableHtml(inGroup)}</div>`;
+  });
+  const ungrouped = students.filter(s => !s.group_id || !groups.some(g => g.id === s.group_id));
+  html += `<div class="card"><h3 style="margin-top:0;">No Group</h3>${studentsTableHtml(ungrouped)}</div>`;
+
+  listEl.innerHTML = html;
+  renderGroupList();
+}
+
+function escapeHtml(s) { return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+(async () => {
+  const profile = await requireTeacher();
+  if (!profile) return;
+  renderTeacherNav('Students');
+  const { data: { session: s } } = await sb.auth.getSession();
+  session = s;
+  await loadGroups();
+  renderGroupPickerForAddForm();
+  loadStudents();
+})();
+</script>
+</body>
+</html>

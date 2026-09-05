@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Homework Progress</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/teacher/nav.js"></script>
+</head>
+<body>
+<div class="wrap-wide">
+  <h1 id="title">Loading…</h1>
+  <div class="card" id="summary"></div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Edit Homework Details</h2>
+    <label>Homework name</label>
+    <input type="text" id="editTitle">
+    <label>Instructions</label>
+    <textarea id="editInstructions"></textarea>
+
+    <div id="editListeningFields" style="display:none;">
+      <label>Replace audio file <span style="color:#666; font-weight:400;">(optional — leave blank to keep the current one)</span></label>
+      <input type="file" id="editAudioFile" accept="audio/*">
+      <label>Total required listens</label>
+      <p style="color:#666; font-size:14px; margin:0 0 6px;">How many times a student must listen in total before the deadline — no daily split.</p>
+      <input type="number" id="editTotalRequiredListens" min="1">
+      <label><input type="checkbox" id="editRequirePhoto" style="width:auto; margin-right:6px;"> Require transcription photo</label>
+      <label>Lyrics / transcript</label>
+      <textarea id="editLyrics"></textarea>
+    </div>
+
+    <div id="editReadingFields" style="display:none;">
+      <label>Required reading recordings</label>
+      <input type="number" id="editReadingRecordingsRequired" min="1">
+      <label>Reading material / instructions for students</label>
+      <textarea id="editReadingMaterial"></textarea>
+      <label>Replace passage file <span style="color:#666; font-weight:400;">(optional — leave blank to keep the current one)</span></label>
+      <input type="file" id="editReadingMaterialFile" accept="image/*,.pdf">
+    </div>
+
+    <label>Start date</label>
+    <input type="date" id="editStartDate">
+    <label>Deadline</label>
+    <input type="date" id="editDeadline">
+
+    <button onclick="saveHomeworkEdits()" id="saveEditsBtn">Save Changes</button>
+    <div class="error" id="editErr"></div>
+    <div class="success" id="editOk"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Assigned Students</h2>
+    <p style="color:#666; font-size:14px; margin:0 0 8px;">Change who this homework is assigned to. Removing a student here does not delete anything they've already submitted.</p>
+    <label>Assign to</label>
+    <select id="reassignMode" onchange="onReassignModeChange()">
+      <option value="all">All active students</option>
+      <option value="group">Specific group(s)</option>
+      <option value="selected">Selected students</option>
+    </select>
+    <div id="reassignGroupPicker" style="display:none; max-height:200px; overflow-y:auto; border:1px solid #ddd; border-radius:8px; padding:8px; margin-top:8px;"></div>
+    <div id="reassignStudentPicker" style="display:none; max-height:200px; overflow-y:auto; border:1px solid #ddd; border-radius:8px; padding:8px; margin-top:8px;"></div>
+    <button onclick="updateAssignment()" id="reassignBtn">Update Assignment</button>
+    <div class="error" id="reassignErr"></div>
+    <div class="success" id="reassignOk"></div>
+  </div>
+
+  <div id="table"></div>
+  <div class="card" id="viewer" style="display:none;"></div>
+  <button class="danger" style="max-width:200px;" onclick="archiveHomework()">Archive Homework</button>
+</div>
+<script>
+let hw, students = [];
+const params = new URLSearchParams(location.search);
+const hwId = params.get('id');
+
+async function load() {
+  const { data } = await sb.from('homework').select('*').eq('id', hwId).single();
+  hw = data;
+  const icon = hw.type === 'listening' ? '🎧 ' : hw.type === 'reading' ? '🎤 ' : hw.type === 'vocabulary' ? '📚 ' : hw.type === 'grammar' ? '✏️ ' : '💬 ';
+  document.getElementById('title').textContent = icon + hw.title;
+
+  populateEditForm();
+
+  const { data: assigned } = await sb.from('homework_assignments').select('student_id, profiles(*)').eq('homework_id', hwId);
+  students = (assigned || []).map(a => a.profiles).sort((a,b) => a.name.localeCompare(b.name));
+
+  if (hw.type === 'listening') {
+    document.getElementById('summary').innerHTML =
+      `Required: <b>${hw.total_required_listens || hw.listens_per_day} total listens</b> before the deadline (no daily split)`;
+    await renderListeningTable();
+  } else if (hw.type === 'reading') {
+    const reqLine = hw.reading_recordings_required
+      ? `Required reading recordings: <b>${hw.reading_recordings_required}</b><br>` : '';
+    document.getElementById('summary').innerHTML = `${reqLine}<b>${hw.instructions || ''}</b>`;
+    await renderReadingTable();
+  } else if (hw.type === 'vocabulary' || hw.type === 'grammar') {
+    document.getElementById('summary').innerHTML = `<b>${hw.instructions || ''}</b>`;
+    await renderPhotoTable();
+  } else {
+    document.getElementById('summary').innerHTML = `<b>${hw.instructions || ''}</b>`;
+    await renderChatgptTable();
+  }
+}
+
+function populateEditForm() {
+  document.getElementById('editTitle').value = hw.title || '';
+  document.getElementById('editInstructions').value = hw.instructions || '';
+  document.getElementById('editStartDate').value = hw.start_date || '';
+  document.getElementById('editDeadline').value = hw.deadline || '';
+
+  document.getElementById('editListeningFields').style.display = hw.type === 'listening' ? '' : 'none';
+  document.getElementById('editReadingFields').style.display = hw.type === 'reading' ? '' : 'none';
+
+  if (hw.type === 'listening') {
+    document.getElementById('editTotalRequiredListens').value = hw.total_required_listens || hw.listens_per_day || 1;
+    document.getElementById('editRequirePhoto').checked = !!hw.require_photo;
+    document.getElementById('editLyrics').value = hw.lyrics || '';
+  } else if (hw.type === 'reading') {
+    document.getElementById('editReadingRecordingsRequired').value = hw.reading_recordings_required || 1;
+    document.getElementById('editReadingMaterial').value = hw.reading_material || '';
+  }
+}
+
+
+async function saveHomeworkEdits() {
+  const errEl = document.getElementById('editErr'), okEl = document.getElementById('editOk');
+  errEl.textContent = ''; okEl.textContent = '';
+
+  const title = document.getElementById('editTitle').value.trim();
+  const instructions = document.getElementById('editInstructions').value.trim();
+  const startDate = document.getElementById('editStartDate').value;
+  const deadline = document.getElementById('editDeadline').value;
+  if (!title || !startDate || !deadline) { errEl.textContent = 'Please fill in name, start date, and deadline.'; return; }
+  if (deadline < startDate) { errEl.textContent = 'Deadline cannot be before the start date.'; return; }
+
+  document.getElementById('saveEditsBtn').disabled = true;
+  try {
+    const updates = { title, instructions, start_date: startDate, deadline };
+
+    if (hw.type === 'listening') {
+      const file = document.getElementById('editAudioFile').files[0];
+      if (file) {
+        const path = `${crypto.randomUUID()}-${file.name}`;
+        const { error: upErr } = await sb.storage.from('homework-audio').upload(path, file);
+        if (upErr) { errEl.textContent = 'Audio upload failed: ' + upErr.message; return; }
+        updates.audio_file_path = path;
+      }
+      updates.total_required_listens = parseInt(document.getElementById('editTotalRequiredListens').value) || 1;
+      updates.listens_per_day = updates.total_required_listens; // kept in sync for older code paths
+      updates.require_photo = document.getElementById('editRequirePhoto').checked;
+      updates.lyrics = document.getElementById('editLyrics').value.trim();
+    } else if (hw.type === 'reading') {
+      updates.reading_recordings_required = parseInt(document.getElementById('editReadingRecordingsRequired').value) || 1;
+      updates.reading_material = document.getElementById('editReadingMaterial').value.trim();
+      const materialFile = document.getElementById('editReadingMaterialFile').files[0];
+      if (materialFile) {
+        const matPath = `${crypto.randomUUID()}-${materialFile.name}`;
+        const { error: matErr } = await sb.storage.from('homework-materials').upload(matPath, materialFile);
+        if (matErr) { errEl.textContent = 'Passage file upload failed: ' + matErr.message; return; }
+        updates.reading_material_file_path = matPath;
+      }
+    }
+
+    const { error } = await sb.from('homework').update(updates).eq('id', hwId);
+    if (error) { errEl.textContent = error.message; return; }
+
+    okEl.textContent = 'Saved!';
+    document.getElementById('editAudioFile').value = '';
+    document.getElementById('editReadingMaterialFile').value = '';
+    await load();
+  } finally {
+    document.getElementById('saveEditsBtn').disabled = false;
+  }
+}
+
+async function renderListeningTable() {
+  // Listening is tracked as ONE cumulative total across the whole assignment
+  // window (see listening-update.js) — there are no more per-day columns/
+  // quotas, so this sums every progress row per student rather than looking
+  // for a fixed set of day_number columns (which no longer exist for
+  // homework created under the current model).
+  const { data: progress } = await sb.from('listening_progress').select('*').eq('homework_id', hwId);
+  const { data: submissions } = await sb.from('submissions').select('*').eq('homework_id', hwId).eq('type', 'photo');
+  const required = hw.total_required_listens || hw.listens_per_day || 0;
+
+  let head = '<tr><th>Student</th><th>Total Listens</th><th>Photo</th></tr>';
+  let rows = students.map(s => {
+    const total = (progress || []).filter(pr => pr.student_id === s.id).reduce((sum, pr) => sum + pr.completed_listens, 0);
+    const met = required > 0 && total >= required;
+    const symbol = met ? '✓' : (total > 0 ? '🟡' : '🔴');
+    const totalCell = `${total}/${required} ${symbol}`;
+    const sub = (submissions || []).find(sub => sub.student_id === s.id);
+    const photoCount = sub ? sub.file_path.split(',').length : 0;
+    const photoCell = sub
+      ? `<a class="link" href="#" onclick="viewChatPhotos('${sub.file_path}', '${escapeHtml(s.name)}', 'Transcription'); return false;">✓ VIEW (${photoCount})</a>`
+      : (hw.require_photo ? '✗' : '—');
+    return `<tr><td>${escapeHtml(s.name)}</td><td><b>${totalCell}</b></td><td>${photoCell}</td></tr>`;
+  }).join('');
+  document.getElementById('table').innerHTML = `<div class="card"><table>${head}${rows}</table></div>`;
+}
+
+async function renderReadingTable() {
+  const { data: readingSubs } = await sb.from('submissions').select('*').eq('homework_id', hwId).eq('type', 'reading_audio');
+  const { data: retellingSubs } = await sb.from('submissions').select('*').eq('homework_id', hwId).eq('type', 'retelling_audio');
+  let rows = students.map(s => {
+    const rCount = (readingSubs || []).filter(sub => sub.student_id === s.id).length;
+    const tCount = (retellingSubs || []).filter(sub => sub.student_id === s.id).length;
+    const required = hw.reading_recordings_required || 0;
+    const rMet = required > 0 && rCount >= required;
+    const rSymbol = required > 0 ? (rMet ? ' ✓' : (rCount > 0 ? ' 🟡' : ' 🔴')) : '';
+    const rCountLabel = required > 0 ? `${rCount}/${required}` : `${rCount} recording${rCount === 1 ? '' : 's'}`;
+    const rCell = rCount > 0
+      ? `<a class="link" href="#" onclick="viewRecordings('reading_audio', '${s.id}', '${escapeHtml(s.name)}'); return false;">${rCountLabel}${rSymbol}</a>`
+      : `✗ ${rCountLabel}${rSymbol}`;
+    const tCell = tCount > 0
+      ? `<a class="link" href="#" onclick="viewRecordings('retelling_audio', '${s.id}', '${escapeHtml(s.name)}'); return false;">✓ ${tCount} recording${tCount === 1 ? '' : 's'}</a>`
+      : '✗ 0 recordings';
+    return `<tr><td>${escapeHtml(s.name)}</td><td>${rCell}</td><td>${tCell}</td></tr>`;
+  }).join('');
+  document.getElementById('table').innerHTML = `<div class="card"><table><tr><th>Student</th><th>🎤 Reading</th><th>🗣 Retelling</th></tr>${rows}</table></div>`;
+}
+
+async function viewRecordings(type, studentId, name) {
+  const { data: subs } = await sb.from('submissions').select('*')
+    .eq('homework_id', hwId).eq('student_id', studentId).eq('type', type)
+    .order('submitted_at', { ascending: true });
+  const label = type === 'reading_audio' ? 'Reading' : 'Retelling';
+  const el = document.getElementById('viewer');
+  el.style.display = '';
+  el.innerHTML = `<h2 style="margin-top:0;">${name}'s ${label} Recordings (${(subs||[]).length})</h2>` +
+    (subs || []).map((s, i) => `<div style="margin-bottom:14px;">
+      <div style="color:#666; font-size:14px; margin-bottom:2px;">#${i + 1} — ${new Date(s.submitted_at).toLocaleString()}</div>
+      <audio controls id="rec-${type}-${i}"></audio>
+    </div>`).join('');
+  for (let i = 0; i < (subs || []).length; i++) {
+    const { data } = await sb.storage.from('submissions').createSignedUrl(subs[i].file_path, 3600);
+    if (data) document.getElementById(`rec-${type}-${i}`).src = data.signedUrl;
+  }
+  el.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function renderChatgptTable() {
+  const { data: textSubs } = await sb.from('submissions').select('*').eq('homework_id', hwId).eq('type', 'chat_text');
+  const { data: photoSubs } = await sb.from('submissions').select('*').eq('homework_id', hwId).eq('type', 'chat_photo');
+  let rows = students.map(s => {
+    const t = (textSubs || []).find(sub => sub.student_id === s.id);
+    const p = (photoSubs || []).find(sub => sub.student_id === s.id);
+    const textCell = t
+      ? `<a class="link" href="#" onclick="viewChatText(${JSON.stringify(t.text_content)}, '${escapeHtml(s.name)}'); return false;">✓ VIEW</a>`
+      : '✗';
+    const photoCell = p
+      ? `<a class="link" href="#" onclick="viewChatPhotos('${p.file_path}', '${escapeHtml(s.name)}', 'Chat Screenshots'); return false;">✓ VIEW (${p.file_path.split(',').length})</a>`
+      : '✗';
+    return `<tr><td>${escapeHtml(s.name)}</td><td>${textCell}</td><td>${photoCell}</td></tr>`;
+  }).join('');
+  document.getElementById('table').innerHTML = `<div class="card"><table><tr><th>Student</th><th>Pasted Text</th><th>Screenshots</th></tr>${rows}</table></div>`;
+}
+
+async function renderPhotoTable() {
+  const { data: photoSubs } = await sb.from('submissions').select('*').eq('homework_id', hwId).eq('type', 'photo');
+  let rows = students.map(s => {
+    const p = (photoSubs || []).find(sub => sub.student_id === s.id);
+    const photoCell = p
+      ? `<a class="link" href="#" onclick="viewChatPhotos('${p.file_path}', '${escapeHtml(s.name)}', 'Photos'); return false;">✓ VIEW (${p.file_path.split(',').length})</a>`
+      : '✗';
+    return `<tr><td>${escapeHtml(s.name)}</td><td>${photoCell}</td></tr>`;
+  }).join('');
+  document.getElementById('table').innerHTML = `<div class="card"><table><tr><th>Student</th><th>Photos</th></tr>${rows}</table></div>`;
+}
+
+function viewChatText(text, name) {
+  const el = document.getElementById('viewer');
+  el.style.display = '';
+  el.innerHTML = `<h2 style="margin-top:0;">${name}'s Chat</h2><div style="white-space:pre-wrap; background:#f9fafb; padding:12px; border-radius:8px;">${escapeHtml(text)}</div>`;
+  el.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function viewChatPhotos(pathCsv, name, label) {
+  const paths = pathCsv.split(',');
+  const el = document.getElementById('viewer');
+  el.style.display = '';
+  let imgs = '';
+  for (const path of paths) {
+    const { data } = await sb.storage.from('submissions').createSignedUrl(path, 3600);
+    if (data) imgs += `<img src="${data.signedUrl}" style="max-width:100%; border-radius:8px; margin-bottom:10px;">`;
+  }
+  el.innerHTML = `<h2 style="margin-top:0;">${name}'s ${label || 'Photos'}</h2>${imgs}`;
+  el.scrollIntoView({ behavior: 'smooth' });
+}
+
+let allStudents = [], allGroups = [], assignedIds = new Set();
+
+async function loadAssignmentControls() {
+  const { data: sAll } = await sb.from('profiles').select('id,name,active,group_id').eq('role', 'student').order('name');
+  allStudents = sAll || [];
+  const { data: gAll } = await sb.from('groups').select('*').order('name');
+  allGroups = gAll || [];
+  assignedIds = new Set(students.map(s => s.id));
+
+  renderGroupPicker();
+  renderStudentPicker();
+}
+
+function renderGroupPicker() {
+  const el = document.getElementById('reassignGroupPicker');
+  let opts = allGroups.map(g =>
+    `<label style="font-weight:400; display:block; margin:4px 0;"><input type="checkbox" class="reassign-group-check" value="${g.id}" style="width:auto; margin-right:6px;">${escapeHtml(g.name)}</label>`
+  ).join('');
+  opts += `<label style="font-weight:400; display:block; margin:4px 0;"><input type="checkbox" class="reassign-group-check" value="__none__" style="width:auto; margin-right:6px;">No group</label>`;
+  el.innerHTML = opts;
+}
+
+function renderStudentPicker() {
+  const el = document.getElementById('reassignStudentPicker');
+  el.innerHTML = allStudents.map(s =>
+    `<label style="font-weight:400; display:block; margin:4px 0;"><input type="checkbox" class="reassign-student-check" value="${s.id}" ${assignedIds.has(s.id) ? 'checked' : ''} style="width:auto; margin-right:6px;">${escapeHtml(s.name)}${s.active ? '' : ' (inactive)'}</label>`
+  ).join('') || '<p style="color:#666; margin:0;">No students yet.</p>';
+}
+
+function onReassignModeChange() {
+  const mode = document.getElementById('reassignMode').value;
+  document.getElementById('reassignGroupPicker').style.display = mode === 'group' ? '' : 'none';
+  document.getElementById('reassignStudentPicker').style.display = mode === 'selected' ? '' : 'none';
+}
+
+async function updateAssignment() {
+  const errEl = document.getElementById('reassignErr'), okEl = document.getElementById('reassignOk');
+  errEl.textContent = ''; okEl.textContent = '';
+  const mode = document.getElementById('reassignMode').value;
+  let finalIds;
+  if (mode === 'all') {
+    finalIds = allStudents.filter(s => s.active).map(s => s.id);
+  } else if (mode === 'group') {
+    const checked = Array.from(document.querySelectorAll('.reassign-group-check:checked')).map(el => el.value);
+    if (checked.length === 0) { errEl.textContent = 'Please select at least one group.'; return; }
+    finalIds = allStudents.filter(s => checked.includes(s.group_id || '__none__')).map(s => s.id);
+  } else {
+    finalIds = Array.from(document.querySelectorAll('.reassign-student-check:checked')).map(el => el.value);
+  }
+
+  const finalSet = new Set(finalIds);
+  const toAdd = finalIds.filter(id => !assignedIds.has(id));
+  const toRemove = Array.from(assignedIds).filter(id => !finalSet.has(id));
+
+  if (toAdd.length === 0 && toRemove.length === 0) { okEl.textContent = 'No changes to make.'; return; }
+
+  document.getElementById('reassignBtn').disabled = true;
+  try {
+    if (toAdd.length > 0) {
+      const { error } = await sb.from('homework_assignments').insert(toAdd.map(id => ({ homework_id: hwId, student_id: id })));
+      if (error) { errEl.textContent = error.message; return; }
+    }
+    if (toRemove.length > 0) {
+      const { error } = await sb.from('homework_assignments').delete().eq('homework_id', hwId).in('student_id', toRemove);
+      if (error) { errEl.textContent = error.message; return; }
+    }
+    okEl.textContent = `Updated! ${finalIds.length} student${finalIds.length === 1 ? '' : 's'} now assigned.`;
+    await load();
+    await loadAssignmentControls();
+  } finally {
+    document.getElementById('reassignBtn').disabled = false;
+  }
+}
+
+async function archiveHomework() {
+  if (!confirm('Archive this homework? It will be hidden from active lists.')) return;
+  await sb.from('homework').update({ archived: true }).eq('id', hwId);
+  window.location.href = '/teacher/homework.html';
+}
+
+function escapeHtml(s) { return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+(async () => {
+  const profile = await requireTeacher();
+  if (!profile) return;
+  renderTeacherNav('Homework');
+  await load();
+  await loadAssignmentControls();
+})();
+</script>
+</body>
+</html>

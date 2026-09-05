@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Student Progress</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b1120">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://wotrxllrtwgegavdudbe.supabase.co">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="/js/pwa-register.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/supabase-client.js"></script>
+<script src="/teacher/nav.js"></script>
+</head>
+<body>
+<div class="wrap-wide">
+  <h1 id="title">Loading…</h1>
+  <div id="list">Loading…</div>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const studentId = params.get('id');
+
+async function load() {
+  const { data: student } = await sb.from('profiles').select('*').eq('id', studentId).single();
+  document.getElementById('title').textContent = `📋 ${student.name}'s Homework Overview`;
+
+  const { data: assigned } = await sb.from('homework_assignments').select('homework:homework_id(*)').eq('student_id', studentId);
+  const list = (assigned || []).map(a => a.homework).filter(h => h).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+
+  if (list.length === 0) { document.getElementById('list').innerHTML = '<div class="card">No homework assigned to this student yet.</div>'; return; }
+
+  // Batch: one query per data type covering ALL of this student's homework
+  // at once, instead of awaiting a separate round-trip per homework in a
+  // loop — much faster once a student has more than a couple assignments.
+  const listeningIds = list.filter(h => h.type === 'listening').map(h => h.id);
+  const readingIds = list.filter(h => h.type === 'reading').map(h => h.id);
+  const chatgptIds = list.filter(h => h.type === 'chatgpt').map(h => h.id);
+  const vocabularyIds = list.filter(h => h.type === 'vocabulary').map(h => h.id);
+  const grammarIds = list.filter(h => h.type === 'grammar').map(h => h.id);
+  const photoHwIds = [...vocabularyIds, ...grammarIds];
+
+  const [
+    { data: listeningProgress },
+    { data: photoSubs },
+    { data: readingSubs },
+    { data: retellingSubs },
+    { data: chatTextSubs },
+    { data: chatPhotoSubs },
+    { data: vocabGrammarPhotoSubs }
+  ] = await Promise.all([
+    listeningIds.length ? sb.from('listening_progress').select('*').eq('student_id', studentId).in('homework_id', listeningIds) : Promise.resolve({ data: [] }),
+    listeningIds.length ? sb.from('submissions').select('*').eq('student_id', studentId).eq('type', 'photo').in('homework_id', listeningIds) : Promise.resolve({ data: [] }),
+    readingIds.length ? sb.from('submissions').select('*').eq('student_id', studentId).eq('type', 'reading_audio').in('homework_id', readingIds) : Promise.resolve({ data: [] }),
+    readingIds.length ? sb.from('submissions').select('*').eq('student_id', studentId).eq('type', 'retelling_audio').in('homework_id', readingIds) : Promise.resolve({ data: [] }),
+    chatgptIds.length ? sb.from('submissions').select('*').eq('student_id', studentId).eq('type', 'chat_text').in('homework_id', chatgptIds) : Promise.resolve({ data: [] }),
+    chatgptIds.length ? sb.from('submissions').select('*').eq('student_id', studentId).eq('type', 'chat_photo').in('homework_id', chatgptIds) : Promise.resolve({ data: [] }),
+    photoHwIds.length ? sb.from('submissions').select('*').eq('student_id', studentId).eq('type', 'photo').in('homework_id', photoHwIds) : Promise.resolve({ data: [] })
+  ]);
+
+  let html = '';
+  for (const hw of list) {
+    const archivedTag = hw.archived ? ' <span style="color:#999; font-weight:400; font-size:13px;">(archived)</span>' : '';
+    if (hw.type === 'listening') {
+      const totalDone = (listeningProgress || []).filter(p => p.homework_id === hw.id).reduce((sum, p) => sum + p.completed_listens, 0);
+      const photo = (photoSubs || []).find(p => p.homework_id === hw.id);
+      const required = hw.total_required_listens || hw.listens_per_day;
+      const complete = totalDone >= required && (!hw.require_photo || photo);
+      html += row('🎧', hw, complete, `${totalDone}/${required} listens${hw.require_photo ? `, photo ${photo ? '✓' : '✗'}` : ''}`, archivedTag);
+    } else if (hw.type === 'reading') {
+      const rCount = (readingSubs || []).filter(p => p.homework_id === hw.id).length;
+      const tCount = (retellingSubs || []).filter(p => p.homework_id === hw.id).length;
+      html += row('🎤', hw, rCount > 0 && tCount > 0, `${rCount} reading recording${rCount === 1 ? '' : 's'}, ${tCount} retelling recording${tCount === 1 ? '' : 's'}`, archivedTag);
+    } else if (hw.type === 'vocabulary' || hw.type === 'grammar') {
+      const p = (vocabGrammarPhotoSubs || []).find(p => p.homework_id === hw.id);
+      const icon = hw.type === 'vocabulary' ? '📚' : '✏️';
+      html += row(icon, hw, !!p, p ? 'Photos submitted' : 'Not submitted', archivedTag);
+    } else {
+      const t = (chatTextSubs || []).find(p => p.homework_id === hw.id);
+      const p = (chatPhotoSubs || []).find(p => p.homework_id === hw.id);
+      html += row('💬', hw, !!(t || p), (t || p) ? 'Chat submitted' : 'Not submitted', archivedTag);
+    }
+  }
+  document.getElementById('list').innerHTML = html;
+}
+
+function row(icon, hw, complete, statusText, archivedTag) {
+  const badge = complete ? '<span class="badge done">✓ Complete</span>' : '<span class="badge none">Incomplete</span>';
+  return `<div class="card">
+    <b>${icon} ${escapeHtml(hw.title)}</b>${archivedTag} ${badge}<br>
+    <span style="color:#666; font-size:14px;">Deadline: ${hw.deadline} &nbsp;•&nbsp; ${statusText}</span><br>
+    <a class="link" href="/teacher/homework-view.html?id=${hw.id}">View full class details →</a>
+  </div>`;
+}
+
+function escapeHtml(s) { return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+(async () => {
+  const profile = await requireTeacher();
+  if (!profile) return;
+  renderTeacherNav('Students');
+  load();
+})();
+</script>
+</body>
+</html>
