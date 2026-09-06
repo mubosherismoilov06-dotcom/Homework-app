@@ -187,6 +187,7 @@ function studentRowHtml(s) {
     <tr>
       <td>${escapeHtml(s.name)}</td>
       <td>${escapeHtml(s.username)}</td>
+      <td>${escapeHtml(s.plaintext_password || '—')}</td>
       <td><span class="badge ${s.active ? 'done' : 'none'}">${s.active ? 'Active' : 'Inactive'}</span></td>
       <td style="min-width:140px;">
         <select onchange="reassignStudent(this, '${s.id}')">${groupOptionsHtml(s.group_id)}</select>
@@ -199,7 +200,7 @@ function studentRowHtml(s) {
 
 function studentsTableHtml(list) {
   if (list.length === 0) return '<p style="color:#666; margin:0;">No students here.</p>';
-  return `<table><tr><th>Name</th><th>Username</th><th>Status</th><th>Group</th><th></th><th></th><th></th></tr>${list.map(studentRowHtml).join('')}</table>`;
+  return `<table><tr><th>Name</th><th>Username</th><th>Password</th><th>Status</th><th>Group</th><th></th><th></th><th></th></tr>${list.map(studentRowHtml).join('')}</table>`;
 }
 
 async function loadStudents() {
