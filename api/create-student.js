@@ -34,7 +34,8 @@ export default async function handler(request) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({
           id: created.id, name, username: username.trim().toLowerCase(),
-          role: 'student', student_id_number: student_id_number || null, active: true
+          role: 'student', student_id_number: student_id_number || null, active: true,
+          plaintext_password: password
         })
       });
     } catch (profileErr) {
