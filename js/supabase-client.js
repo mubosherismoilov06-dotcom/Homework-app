@@ -63,3 +63,26 @@ async function authedFetch(url, options = {}) {
 function usernameToEmail(username) {
   return username.trim().toLowerCase() + "@students.homeworkapp.local";
 }
+
+// Deadlines are stored as real timestamps (timestamptz) now, not plain
+// dates, so every page that shows a deadline should go through this
+// instead of printing hw.deadline directly.
+function formatDeadline(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso; // fallback for any not-yet-migrated plain-date rows
+  return d.toLocaleString(undefined, {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit"
+  });
+}
+
+// Converts a stored timestamptz (UTC ISO string) into the local
+// "YYYY-MM-DDTHH:MM" format a <input type="datetime-local"> expects.
+function toDatetimeLocalValue(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
