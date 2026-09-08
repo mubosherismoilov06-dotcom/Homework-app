@@ -76,8 +76,8 @@
 
     <label>Start date</label>
     <input type="date" id="startDate">
-    <label>Deadline</label>
-    <input type="date" id="deadline">
+    <label>Deadline (date &amp; time)</label>
+    <input type="datetime-local" id="deadline">
 
     <label>Assign to</label>
     <select id="assignMode" onchange="onAssignModeChange()">
@@ -134,9 +134,11 @@ async function createHomework() {
   const title = document.getElementById('title').value.trim();
   const instructions = document.getElementById('instructions').value.trim();
   const startDate = document.getElementById('startDate').value;
-  const deadline = document.getElementById('deadline').value;
-  if (!title || !startDate || !deadline) { errEl.textContent = 'Please fill in name, start date, and deadline.'; return; }
-  if (deadline < startDate) { errEl.textContent = 'Deadline cannot be before the start date.'; return; }
+  const deadlineLocal = document.getElementById('deadline').value;
+  if (!title || !startDate || !deadlineLocal) { errEl.textContent = 'Please fill in name, start date, and deadline.'; return; }
+  if (new Date(deadlineLocal) < new Date(startDate)) { errEl.textContent = 'Deadline cannot be before the start date.'; return; }
+  // Stored as a real UTC timestamp so the archive/expiry job can compare it to now() precisely.
+  const deadline = new Date(deadlineLocal).toISOString();
 
   document.getElementById('createBtn').disabled = true;
   try {
@@ -203,7 +205,7 @@ async function loadList() {
   el.innerHTML = hws.map(h => `
     <div class="card">
       <b>${h.type === 'listening' ? '🎧' : h.type === 'reading' ? '🎤' : h.type === 'vocabulary' ? '📚' : h.type === 'grammar' ? '✏️' : '💬'} ${escapeHtml(h.title)}</b><br>
-      <span style="color:#666; font-size:14px;">Deadline: ${h.deadline}</span><br>
+      <span style="color:#666; font-size:14px;">Deadline: ${formatDeadline(h.deadline)}${h.archived ? ' <span style="color:#999;">(archived)</span>' : ''}</span><br>
       <a class="link" href="/teacher/homework-view.html?id=${h.id}">View progress / edit →</a>
     </div>`).join('');
 }

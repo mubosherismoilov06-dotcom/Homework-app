@@ -51,8 +51,8 @@
 
     <label>Start date</label>
     <input type="date" id="editStartDate">
-    <label>Deadline</label>
-    <input type="date" id="editDeadline">
+    <label>Deadline (date &amp; time)</label>
+    <input type="datetime-local" id="editDeadline">
 
     <button onclick="saveHomeworkEdits()" id="saveEditsBtn">Save Changes</button>
     <div class="error" id="editErr"></div>
@@ -117,7 +117,7 @@ function populateEditForm() {
   document.getElementById('editTitle').value = hw.title || '';
   document.getElementById('editInstructions').value = hw.instructions || '';
   document.getElementById('editStartDate').value = hw.start_date || '';
-  document.getElementById('editDeadline').value = hw.deadline || '';
+  document.getElementById('editDeadline').value = toDatetimeLocalValue(hw.deadline);
 
   document.getElementById('editListeningFields').style.display = hw.type === 'listening' ? '' : 'none';
   document.getElementById('editReadingFields').style.display = hw.type === 'reading' ? '' : 'none';
@@ -140,9 +140,10 @@ async function saveHomeworkEdits() {
   const title = document.getElementById('editTitle').value.trim();
   const instructions = document.getElementById('editInstructions').value.trim();
   const startDate = document.getElementById('editStartDate').value;
-  const deadline = document.getElementById('editDeadline').value;
-  if (!title || !startDate || !deadline) { errEl.textContent = 'Please fill in name, start date, and deadline.'; return; }
-  if (deadline < startDate) { errEl.textContent = 'Deadline cannot be before the start date.'; return; }
+  const deadlineLocal = document.getElementById('editDeadline').value;
+  if (!title || !startDate || !deadlineLocal) { errEl.textContent = 'Please fill in name, start date, and deadline.'; return; }
+  if (new Date(deadlineLocal) < new Date(startDate)) { errEl.textContent = 'Deadline cannot be before the start date.'; return; }
+  const deadline = new Date(deadlineLocal).toISOString();
 
   document.getElementById('saveEditsBtn').disabled = true;
   try {

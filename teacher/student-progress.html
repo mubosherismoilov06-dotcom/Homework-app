@@ -93,7 +93,7 @@ function row(icon, hw, complete, statusText, archivedTag) {
   const badge = complete ? '<span class="badge done">✓ Complete</span>' : '<span class="badge none">Incomplete</span>';
   return `<div class="card">
     <b>${icon} ${escapeHtml(hw.title)}</b>${archivedTag} ${badge}<br>
-    <span style="color:#666; font-size:14px;">Deadline: ${hw.deadline} &nbsp;•&nbsp; ${statusText}</span><br>
+    <span style="color:#666; font-size:14px;">Deadline: ${formatDeadline(hw.deadline)} &nbsp;•&nbsp; ${statusText}</span><br>
     <a class="link" href="/teacher/homework-view.html?id=${hw.id}">View full class details →</a>
   </div>`;
 }
