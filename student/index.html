@@ -47,7 +47,7 @@
         .eq('homework_id', hw.id).eq('student_id', profile.id).eq('type', 'photo').maybeSingle();
       html += `<div class="card">
         <b>🎧 ${escapeHtml(hw.title)}</b><br>
-        Listens: <b>${done} / ${required}</b> before ${hw.deadline}<br>
+        Listens: <b>${done} / ${required}</b> before ${formatDeadline(hw.deadline)}<br>
         ${hw.require_photo ? `Transcription: ${photo ? 'Submitted ✓' : 'Not submitted'}<br>` : ''}
         <a class="btn" href="/student/listening.html?id=${hw.id}">Open</a>
       </div>`;
