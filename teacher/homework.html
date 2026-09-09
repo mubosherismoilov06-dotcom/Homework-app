@@ -80,10 +80,13 @@
     <input type="datetime-local" id="deadline">
 
     <label>Assign to</label>
-    <select id="assignMode" onchange="onAssignModeChange()">
-      <option value="all">All active students</option>
-    </select>
-    <p id="groupPickNote" style="display:none; color:#666; font-size:14px; margin:6px 0 0;"></p>
+    <div id="assignGroups" style="border:1px solid #e5e7eb; border-radius:8px; padding:10px;">
+      <label style="display:flex; align-items:center; font-weight:600; margin-bottom:6px;">
+        <input type="checkbox" id="assignAll" onchange="onAssignAllChange()" style="width:auto; margin-right:8px;"> All active students
+      </label>
+      <div id="groupCheckboxes" style="padding-left:2px; display:flex; flex-direction:column; gap:4px;">Loading groups…</div>
+    </div>
+    <p id="groupPickNote" style="color:#666; font-size:14px; margin:6px 0 0;"></p>
 
     <button onclick="createHomework()" id="createBtn">Create Homework</button>
     <div class="error" id="err"></div>
@@ -104,27 +107,52 @@ function onTypeChange() {
   document.getElementById('vocabularyFields').style.display = type === 'vocabulary' ? '' : 'none';
   document.getElementById('grammarFields').style.display = type === 'grammar' ? '' : 'none';
 }
-function onAssignModeChange() {
-  const mode = document.getElementById('assignMode').value;
+let groupOptions = [];
+
+function checkedGroupIds() {
+  return groupOptions.filter(g => document.getElementById(`group-${g.id}`)?.checked).map(g => g.id);
+}
+
+function onAssignAllChange() {
+  const allChecked = document.getElementById('assignAll').checked;
+  groupOptions.forEach(g => {
+    const cb = document.getElementById(`group-${g.id}`);
+    if (cb) { cb.checked = false; cb.disabled = allChecked; }
+  });
+  updateAssignNote();
+}
+
+function onGroupCheckChange() {
+  updateAssignNote();
+}
+
+function updateAssignNote() {
   const noteEl = document.getElementById('groupPickNote');
-  if (mode !== 'all') {
-    const opt = document.querySelector(`#assignMode option[value="${mode}"]`);
-    noteEl.textContent = `Will assign to every active student currently in "${opt ? opt.textContent : 'this group'}".`;
-    noteEl.style.display = '';
+  if (document.getElementById('assignAll').checked) {
+    noteEl.textContent = 'Will assign to every active student.';
+    return;
+  }
+  const names = groupOptions.filter(g => checkedGroupIds().includes(g.id)).map(g => g.name);
+  if (names.length === 0) {
+    noteEl.textContent = 'Pick "All active students" or one or more groups.';
   } else {
-    noteEl.style.display = 'none';
+    noteEl.textContent = `Will assign to every active student currently in: ${names.join(', ')}.`;
   }
 }
 
 async function loadGroupOptions() {
   const { data: groups } = await sb.from('groups').select('id,name').eq('teacher_id', profile.id).order('name');
-  const el = document.getElementById('assignMode');
-  (groups || []).forEach(g => {
-    const opt = document.createElement('option');
-    opt.value = g.id;
-    opt.textContent = g.name;
-    el.appendChild(opt);
-  });
+  groupOptions = groups || [];
+  const el = document.getElementById('groupCheckboxes');
+  if (groupOptions.length === 0) {
+    el.innerHTML = '<p style="color:#666; font-size:14px; margin:0;">No groups yet — create one from the Students page.</p>';
+  } else {
+    el.innerHTML = groupOptions.map(g => `
+      <label style="display:flex; align-items:center;">
+        <input type="checkbox" id="group-${g.id}" onchange="onGroupCheckChange()" style="width:auto; margin-right:8px;"> ${escapeHtml(g.name)}
+      </label>`).join('');
+  }
+  updateAssignNote();
 }
 
 async function createHomework() {
@@ -137,6 +165,9 @@ async function createHomework() {
   const deadlineLocal = document.getElementById('deadline').value;
   if (!title || !startDate || !deadlineLocal) { errEl.textContent = 'Please fill in name, start date, and deadline.'; return; }
   if (new Date(deadlineLocal) < new Date(startDate)) { errEl.textContent = 'Deadline cannot be before the start date.'; return; }
+  const assignAll = document.getElementById('assignAll').checked;
+  const chosenGroupIds = checkedGroupIds();
+  if (!assignAll && chosenGroupIds.length === 0) { errEl.textContent = 'Please pick "All active students" or at least one group.'; return; }
   // Stored as a real UTC timestamp so the archive/expiry job can compare it to now() precisely.
   const deadline = new Date(deadlineLocal).toISOString();
 
@@ -179,12 +210,11 @@ async function createHomework() {
     if (hwErr) { errEl.textContent = hwErr.message; document.getElementById('createBtn').disabled = false; return; }
 
     let studentIds;
-    const assignMode = document.getElementById('assignMode').value;
-    if (assignMode === 'all') {
+    if (assignAll) {
       const { data: all } = await sb.from('profiles').select('id').eq('role','student').eq('active', true);
       studentIds = (all || []).map(s => s.id);
     } else {
-      const { data: groupStudents } = await sb.from('profiles').select('id').eq('role','student').eq('active', true).eq('group_id', assignMode);
+      const { data: groupStudents } = await sb.from('profiles').select('id').eq('role','student').eq('active', true).in('group_id', chosenGroupIds);
       studentIds = (groupStudents || []).map(s => s.id);
     }
     if (studentIds.length > 0) {

@@ -90,6 +90,14 @@ async function openGroup(groupId) {
   await renderGroupChart(members);
 }
 
+const TYPE_META = {
+  listening: { icon: '🎧', label: 'Listening' },
+  reading:   { icon: '🎤', label: 'Reading' },
+  chatgpt:   { icon: '💬', label: 'ChatGPT' },
+  vocabulary:{ icon: '📚', label: 'Vocabulary' },
+  grammar:   { icon: '✏️', label: 'Grammar' }
+};
+
 // Everything below is fetched as a handful of PARALLEL, batched queries
 // (one query per data type covering ALL members at once) instead of
 // looping per-student — that's what keeps this page fast even for a
@@ -106,8 +114,8 @@ async function renderGroupChart(members) {
     { data: chatTextSubs },
     { data: chatPhotoSubs }
   ] = await Promise.all([
-    sb.from('homework_assignments').select('student_id, homework:homework_id(id,type,require_photo)').in('student_id', ids),
-    sb.from('listening_progress').select('student_id, completed_listens').in('student_id', ids),
+    sb.from('homework_assignments').select('student_id, homework:homework_id(id,type,require_photo,created_at)').in('student_id', ids),
+    sb.from('listening_progress').select('student_id, homework_id, completed_listens').in('student_id', ids),
     sb.from('submissions').select('student_id, homework_id').eq('type', 'photo').in('student_id', ids),
     sb.from('submissions').select('student_id, homework_id').eq('type', 'reading_audio').in('student_id', ids),
     sb.from('submissions').select('student_id, homework_id').eq('type', 'retelling_audio').in('student_id', ids),
@@ -115,8 +123,71 @@ async function renderGroupChart(members) {
     sb.from('submissions').select('student_id, homework_id').eq('type', 'chat_photo').in('student_id', ids)
   ]);
 
-  const rows = members.map(s => {
-    const myAssignments = (assignments || []).filter(a => a.student_id === s.id && a.homework);
+  const allAssignments = (assignments || []).filter(a => a.homework);
+
+  // ---- Find the single most-recently-created homework per type, among
+  // everything assigned to this group. That's "the last assignment" for
+  // that type, shown together with the other types' last assignments. ----
+  const latestByType = {};
+  for (const a of allAssignments) {
+    const t = a.homework.type;
+    if (!latestByType[t] || a.homework.created_at > latestByType[t].created_at) latestByType[t] = a.homework;
+  }
+
+  function countsFor(homeworkId, submissionList) {
+    return (submissionList || []).filter(p => p.homework_id === homeworkId);
+  }
+
+  // ---- Section 1: latest assignment of each type, together ----
+  const latestTypes = Object.keys(latestByType);
+  const latestRows = members.map(s => {
+    const cell = {};
+    for (const type of latestTypes) {
+      const hw = latestByType[type];
+      const assigned = allAssignments.some(a => a.student_id === s.id && a.homework.id === hw.id);
+      if (!assigned) { cell[type] = null; continue; }
+      if (type === 'listening') {
+        const listens = (listeningProgress || [])
+          .filter(p => p.student_id === s.id && p.homework_id === hw.id)
+          .reduce((sum, p) => sum + p.completed_listens, 0);
+        if (hw.require_photo) {
+          const photo = countsFor(hw.id, photoSubs).filter(p => p.student_id === s.id).length;
+          cell[type] = `${listens} listens, photo ${photo ? '✓' : '—'}`;
+        } else {
+          cell[type] = `${listens} listens`;
+        }
+      } else if (type === 'reading') {
+        const reading = countsFor(hw.id, readingSubs).filter(p => p.student_id === s.id).length;
+        const retelling = countsFor(hw.id, retellingSubs).filter(p => p.student_id === s.id).length;
+        cell[type] = `${reading} reading, ${retelling} retelling`;
+      } else if (type === 'chatgpt') {
+        const done = countsFor(hw.id, chatTextSubs).some(p => p.student_id === s.id) ||
+          countsFor(hw.id, chatPhotoSubs).some(p => p.student_id === s.id);
+        cell[type] = done ? '✓ submitted' : 'not yet';
+      } else {
+        const count = countsFor(hw.id, photoSubs).filter(p => p.student_id === s.id).length;
+        cell[type] = count ? `✓ (${count} photo${count === 1 ? '' : 's'})` : 'not yet';
+      }
+    }
+    return { student: s, cell };
+  });
+
+  const latestHtml = latestTypes.length === 0 ? '<div class="card">No homework assigned yet.</div>' : `<div class="card" style="overflow-x:auto;">
+    <table>
+      <tr>
+        <th>Student</th>
+        ${latestTypes.map(t => `<th>${TYPE_META[t].icon} ${TYPE_META[t].label}</th>`).join('')}
+      </tr>
+      ${latestRows.map(r => `<tr>
+        <td><a class="link" href="/teacher/student-progress.html?id=${r.student.id}">${escapeHtml(r.student.name)}</a>${r.student.active ? '' : ' <span style="color:#999; font-size:12px;">(inactive)</span>'}</td>
+        ${latestTypes.map(t => `<td>${r.cell[t] === null ? '—' : escapeHtml(r.cell[t])}</td>`).join('')}
+      </tr>`).join('')}
+    </table>
+  </div>`;
+
+  // ---- Section 2: all-time totals (every homework ever, active + archived), as bar charts ----
+  const allTimeRows = members.map(s => {
+    const myAssignments = allAssignments.filter(a => a.student_id === s.id);
     const listeningHw = myAssignments.filter(a => a.homework.type === 'listening');
     const readingHw = myAssignments.filter(a => a.homework.type === 'reading');
     const chatgptHw = myAssignments.filter(a => a.homework.type === 'chatgpt');
@@ -139,39 +210,56 @@ async function renderGroupChart(members) {
     const grammarCount = (photoSubs || []).filter(p => p.student_id === s.id &&
       grammarHw.some(a => a.homework.id === p.homework_id)).length;
 
-    return { student: s, listeningHwCount: listeningHw.length, totalListens,
-      photoRequiredCount: photoRequiredHw.length, photoCount,
+    return { name: s.name,
+      listeningHwCount: listeningHw.length, totalListens,
       readingHwCount: readingHw.length, readingCount, retellingCount,
       chatgptHwCount: chatgptHw.length, chatCount,
       vocabularyHwCount: vocabularyHw.length, vocabularyCount,
       grammarHwCount: grammarHw.length, grammarCount };
   });
 
-  const html = `<div class="card" style="overflow-x:auto;">
-    <table>
-      <tr>
-        <th>Student</th>
-        <th>🎧 Listens</th>
-        <th>📷 Listening Photos</th>
-        <th>🎤 Reading Recordings</th>
-        <th>🗣 Retelling Recordings</th>
-        <th>💬 ChatGPT</th>
-        <th>📚 Vocabulary</th>
-        <th>✏️ Grammar</th>
-      </tr>
-      ${rows.map(r => `<tr>
-        <td><a class="link" href="/teacher/student-progress.html?id=${r.student.id}">${escapeHtml(r.student.name)}</a>${r.student.active ? '' : ' <span style="color:#999; font-size:12px;">(inactive)</span>'}</td>
-        <td>${r.listeningHwCount ? `${r.totalListens} total` : '—'}</td>
-        <td>${r.photoRequiredCount ? `${r.photoCount}/${r.photoRequiredCount}` : '—'}</td>
-        <td>${r.readingHwCount ? `${r.readingCount} recording${r.readingCount === 1 ? '' : 's'}` : '—'}</td>
-        <td>${r.readingHwCount ? `${r.retellingCount} recording${r.retellingCount === 1 ? '' : 's'}` : '—'}</td>
-        <td>${r.chatgptHwCount ? `${r.chatCount}/${r.chatgptHwCount}` : '—'}</td>
-        <td>${r.vocabularyHwCount ? `${r.vocabularyCount}/${r.vocabularyHwCount}` : '—'}</td>
-        <td>${r.grammarHwCount ? `${r.grammarCount}/${r.grammarHwCount}` : '—'}</td>
-      </tr>`).join('')}
-    </table>
+  const charts = [];
+  if (allTimeRows.some(r => r.listeningHwCount)) charts.push(renderBarChart('🎧 Listening — total listens (all time)',
+    allTimeRows.filter(r => r.listeningHwCount).map(r => ({ name: r.name, value: r.totalListens })), ''));
+  if (allTimeRows.some(r => r.readingHwCount)) {
+    charts.push(renderBarChart('🎤 Reading recordings (all time)',
+      allTimeRows.filter(r => r.readingHwCount).map(r => ({ name: r.name, value: r.readingCount })), ''));
+    charts.push(renderBarChart('🗣 Retelling recordings (all time)',
+      allTimeRows.filter(r => r.readingHwCount).map(r => ({ name: r.name, value: r.retellingCount })), ''));
+  }
+  if (allTimeRows.some(r => r.chatgptHwCount)) charts.push(renderBarChart('💬 ChatGPT — chats submitted (all time)',
+    allTimeRows.filter(r => r.chatgptHwCount).map(r => ({ name: r.name, value: r.chatCount })), ''));
+  if (allTimeRows.some(r => r.vocabularyHwCount)) charts.push(renderBarChart('📚 Vocabulary — photos submitted (all time)',
+    allTimeRows.filter(r => r.vocabularyHwCount).map(r => ({ name: r.name, value: r.vocabularyCount })), ''));
+  if (allTimeRows.some(r => r.grammarHwCount)) charts.push(renderBarChart('✏️ Grammar — photos submitted (all time)',
+    allTimeRows.filter(r => r.grammarHwCount).map(r => ({ name: r.name, value: r.grammarCount })), ''));
+
+  const allTimeHtml = charts.length === 0 ? '' : `
+    <h3 style="margin:22px 0 4px;">All-Time Totals</h3>
+    <p style="color:#666; font-size:14px; margin:0 0 12px;">Added up across every homework of that kind ever assigned (active and archived).</p>
+    ${charts.join('')}`;
+
+  document.getElementById('detailTable').innerHTML = `
+    <h3 style="margin:0 0 4px;">Last Assignment (per type)</h3>
+    <p style="color:#666; font-size:14px; margin:0 0 12px;">Only the most recently assigned homework of each type — not history.</p>
+    ${latestHtml}
+    ${allTimeHtml}`;
+}
+
+function renderBarChart(title, rows, unitLabel) {
+  if (rows.length === 0) return '';
+  const max = Math.max(1, ...rows.map(r => r.value));
+  return `<div class="card" style="margin-bottom:12px;">
+    <h4 style="margin:0 0 10px;">${title}</h4>
+    ${rows.map(r => `
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+        <div style="width:110px; font-size:13px; color:#374151; text-align:right; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</div>
+        <div style="flex:1; background:#f3f4f6; border-radius:4px; height:16px; position:relative;">
+          <div style="width:${Math.round(r.value / max * 100)}%; background:#4f46e5; height:100%; border-radius:4px; min-width:${r.value > 0 ? '2px' : '0'};"></div>
+        </div>
+        <div style="width:56px; font-size:12px; color:#6b7280; flex-shrink:0;">${r.value}${unitLabel || ''}</div>
+      </div>`).join('')}
   </div>`;
-  document.getElementById('detailTable').innerHTML = html;
 }
 
 function escapeHtml(s) { return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
