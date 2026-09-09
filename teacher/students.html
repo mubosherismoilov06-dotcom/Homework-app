@@ -171,15 +171,36 @@ async function reassignStudent(selectEl, id) {
 
 async function deleteStudent(id, name) {
   if (!confirm(`Delete ${name}? This permanently removes their account, homework, and submissions. This cannot be undone.`)) return;
-  const res = await authedFetch('/delete-student', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ student_id: id })
-  });
-  if (!res) return; // authedFetch already redirected to login
-  const result = await res.json();
-  if (!res.ok) { alert(result.error || 'Could not delete student.'); return; }
-  loadStudents();
+  try {
+    const res = await authedFetch('/delete-student', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ student_id: id })
+    });
+    if (!res) return; // authedFetch already redirected to login
+
+    // The server may fail before it can return JSON (e.g. a 500 HTML error
+    // page, or a database constraint violation), so don't assume res.json()
+    // will succeed just because we got a response.
+    let result = {};
+    try {
+      result = await res.json();
+    } catch (parseErr) {
+      alert(`Could not delete ${name}: the server returned an unexpected response (status ${res.status}). This usually means the delete failed on the server — often because the student still has related records (homework, submissions) that block deletion. Check the browser console / server logs for details.`);
+      console.error('delete-student: non-JSON response', res.status, parseErr);
+      return;
+    }
+
+    if (!res.ok) {
+      alert(`Could not delete ${name}: ${result.error || `server responded with status ${res.status}`}`);
+      return;
+    }
+
+    loadStudents();
+  } catch (err) {
+    alert(`Could not delete ${name}: ${err.message}`);
+    console.error('deleteStudent failed', err);
+  }
 }
 
 function studentRowHtml(s) {
@@ -187,7 +208,6 @@ function studentRowHtml(s) {
     <tr>
       <td>${escapeHtml(s.name)}</td>
       <td>${escapeHtml(s.username)}</td>
-      <td>${escapeHtml(s.plaintext_password || '—')}</td>
       <td><span class="badge ${s.active ? 'done' : 'none'}">${s.active ? 'Active' : 'Inactive'}</span></td>
       <td style="min-width:140px;">
         <select onchange="reassignStudent(this, '${s.id}')">${groupOptionsHtml(s.group_id)}</select>
@@ -200,7 +220,7 @@ function studentRowHtml(s) {
 
 function studentsTableHtml(list) {
   if (list.length === 0) return '<p style="color:#666; margin:0;">No students here.</p>';
-  return `<table><tr><th>Name</th><th>Username</th><th>Password</th><th>Status</th><th>Group</th><th></th><th></th><th></th></tr>${list.map(studentRowHtml).join('')}</table>`;
+  return `<table><tr><th>Name</th><th>Username</th><th>Status</th><th>Group</th><th></th><th></th><th></th></tr>${list.map(studentRowHtml).join('')}</table>`;
 }
 
 async function loadStudents() {
