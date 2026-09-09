@@ -40,6 +40,13 @@
 .trend .lbl { font-size: 10px; color: #999; margin-top: 4px; }
 
 .empty-note { color: #888; text-align: center; padding: 12px 0; }
+
+.bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.bar-row .bn { width: 96px; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+.bar-row .bn.self { color: var(--gold-600); }
+.bar-row .bt { flex: 1; background: #eef0f5; border-radius: 4px; height: 16px; position: relative; }
+.bar-row .bf { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #40916c, #2d6a4f); min-width: 2px; }
+.bar-row .bv { width: 42px; text-align: right; font-size: 12px; color: #666; flex-shrink: 0; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/js/supabase-client.js"></script>
@@ -53,9 +60,10 @@
     <button id="tab-daily" onclick="setPeriod('daily')">Daily</button>
     <button id="tab-weekly" onclick="setPeriod('weekly')">Weekly</button>
     <button id="tab-monthly" onclick="setPeriod('monthly')">Monthly</button>
+    <button id="tab-alltime" onclick="setAllTime()">All Time</button>
   </div>
 
-  <div class="card">
+  <div class="card" id="periodCard">
     <div class="period-nav">
       <button class="secondary" onclick="shiftPeriod(-1)">‹</button>
       <div class="period-label" id="periodLabel">Loading…</div>
@@ -68,6 +76,12 @@
   <div class="card" id="trendCard" style="display:none;">
     <h2 style="margin-top:0; font-size:16px;">Your trend this period</h2>
     <div class="trend" id="trend"></div>
+  </div>
+
+  <div class="card" id="allTimeCard" style="display:none;">
+    <p style="margin:0 0 4px; color:#666; font-size:13px;" id="allTimeGroupLabel"></p>
+    <p style="margin:0 0 12px; color:#888; font-size:12px;">Every homework ever assigned, weighted equally.</p>
+    <div id="allTimeBars"></div>
   </div>
 </div>
 <script>
@@ -83,10 +97,52 @@ function localDateStr(d = new Date()) {
 
 function setPeriod(p) {
   period = p;
-  ['daily', 'weekly', 'monthly'].forEach(x => {
+  ['daily', 'weekly', 'monthly', 'alltime'].forEach(x => {
     document.getElementById('tab-' + x).className = x === p ? '' : 'inactive';
   });
+  document.getElementById('periodCard').style.display = '';
+  document.getElementById('allTimeCard').style.display = 'none';
   load();
+}
+
+function setAllTime() {
+  ['daily', 'weekly', 'monthly', 'alltime'].forEach(x => {
+    document.getElementById('tab-' + x).className = x === 'alltime' ? '' : 'inactive';
+  });
+  document.getElementById('periodCard').style.display = 'none';
+  document.getElementById('trendCard').style.display = 'none';
+  document.getElementById('allTimeCard').style.display = '';
+  loadAllTime();
+}
+
+async function loadAllTime() {
+  document.getElementById('allTimeBars').innerHTML = 'Loading…';
+  const res = await authedFetch(`${SUPABASE_URL}/functions/v1/leaderboard?scope=all_time`);
+  if (!res) return;
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    document.getElementById('allTimeBars').innerHTML = `<p class="empty-note">${data.error || 'Could not load leaderboard.'}</p>`;
+    return;
+  }
+  if (data.noGroup) {
+    document.getElementById('allTimeBars').innerHTML = `<p class="empty-note">You're not in a group yet — ask your teacher to add you to one.</p>`;
+    return;
+  }
+  document.getElementById('allTimeGroupLabel').textContent = data.groupName ? `Group: ${data.groupName}` : '';
+  if (data.students.length === 0) {
+    document.getElementById('allTimeBars').innerHTML = `<p class="empty-note">No students in your group yet.</p>`;
+    return;
+  }
+  const medals = ['🥇', '🥈', '🥉'];
+  document.getElementById('allTimeBars').innerHTML = data.students.map(s => {
+    const val = s.score === null ? 0 : s.score;
+    const rankTag = s.rank ? (medals[s.rank - 1] || `#${s.rank}`) : '—';
+    return `<div class="bar-row">
+      <div class="bn ${s.isSelf ? 'self' : ''}">${rankTag} ${escapeHtml(s.name)}</div>
+      <div class="bt"><div class="bf" style="width:${val}%;"></div></div>
+      <div class="bv">${s.score === null ? '—' : s.score + '%'}</div>
+    </div>`;
+  }).join('');
 }
 
 function shiftPeriod(dir) {

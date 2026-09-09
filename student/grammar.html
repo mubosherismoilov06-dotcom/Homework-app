@@ -26,9 +26,15 @@
 
   <div class="card">
     <h2 style="margin-top:0;">Upload Photos</h2>
-    <p style="color:#666; font-size:14px; margin-top:-8px;">Take photos of the grammar work you've completed. You can select multiple photos if you have more than one page (up to 10).</p>
-    <input type="file" id="photos" accept="image/*" multiple capture="environment">
-    <button onclick="submitPhotos()" id="submitPhotosBtn">Submit Photos</button>
+    <p style="color:#666; font-size:14px; margin-top:-8px;">Take photos of the grammar work you've completed, or choose existing ones from your gallery/files. You can select multiple photos if you have more than one page (up to 10).</p>
+    <div style="display:flex; gap:8px;">
+      <button type="button" onclick="document.getElementById('photosCam').click()" style="flex:1; width:auto; margin-top:0;">📷 Take Photo</button>
+      <button type="button" class="secondary" onclick="document.getElementById('photosGallery').click()" style="flex:1; width:auto; margin-top:0;">🖼️ Gallery / Files</button>
+    </div>
+    <input type="file" id="photosCam" accept="image/*" capture="environment" multiple style="display:none">
+    <input type="file" id="photosGallery" accept="image/*" multiple style="display:none">
+    <div id="stagedThumbs" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;"></div>
+    <button onclick="submitPhotos()" id="submitPhotosBtn" style="margin-top:12px;" disabled>Submit Photos</button>
     <div class="error" id="photoErr"></div>
     <div class="success" id="photoOk"></div>
   </div>
@@ -37,6 +43,38 @@
 const params = new URLSearchParams(location.search);
 const hwId = params.get('id');
 let profile, hw;
+let staged = []; // { id, file, url } photos picked but not yet submitted
+
+function handleFilePick(fileList) {
+  Array.from(fileList).forEach(file => {
+    if (staged.length >= 10) return;
+    staged.push({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) });
+  });
+  renderStaged();
+}
+
+function renderStaged() {
+  const el = document.getElementById('stagedThumbs');
+  el.innerHTML = '';
+  staged.forEach(item => {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:relative; width:80px; height:80px;';
+    box.innerHTML = `
+      <img src="${item.url}" style="width:80px; height:80px; object-fit:cover; border-radius:6px; border:1px solid #e5e7eb;">
+      <button type="button" onclick="removeStaged('${item.id}')" title="Remove"
+        style="position:absolute; top:-6px; right:-6px; width:22px; height:22px; margin:0; padding:0;
+        border-radius:50%; background:#dc2626; color:#fff; border:2px solid #fff; font-size:13px; line-height:1;">×</button>`;
+    el.appendChild(box);
+  });
+  document.getElementById('submitPhotosBtn').disabled = staged.length === 0;
+}
+
+function removeStaged(id) {
+  const item = staged.find(s => s.id === id);
+  if (item) URL.revokeObjectURL(item.url);
+  staged = staged.filter(s => s.id !== id);
+  renderStaged();
+}
 
 async function load() {
   const { data } = await sb.from('homework').select('*').eq('id', hwId).single();
@@ -52,10 +90,13 @@ async function load() {
   }
 }
 
+document.getElementById('photosCam').addEventListener('change', e => { handleFilePick(e.target.files); e.target.value = ''; });
+document.getElementById('photosGallery').addEventListener('change', e => { handleFilePick(e.target.files); e.target.value = ''; });
+
 async function submitPhotos() {
   const errEl = document.getElementById('photoErr'), okEl = document.getElementById('photoOk');
   errEl.textContent = '';
-  const files = Array.from(document.getElementById('photos').files).slice(0, 10);
+  const files = staged.map(s => s.file);
   if (files.length === 0) { errEl.textContent = 'Please choose at least one photo.'; return; }
 
   document.getElementById('submitPhotosBtn').disabled = true;
@@ -65,7 +106,7 @@ async function submitPhotos() {
   const paths = [];
   try {
     for (let i = 0; i < files.length; i++) {
-      const ext = files[i].name.split('.').pop();
+      const ext = (files[i].name.split('.').pop() || 'jpg').toLowerCase();
       const path = `${profile.id}/${hwId}-grammar-${stamp}-${i + 1}.${ext}`;
       const { error: upErr } = await sb.storage.from('submissions').upload(path, files[i]);
       if (upErr) throw upErr;
@@ -90,6 +131,9 @@ async function submitPhotos() {
     errEl.textContent = `Your photos uploaded but saving the submission failed: ${result.error.message}. Please try Submit again.`;
     return;
   }
+  staged.forEach(s => URL.revokeObjectURL(s.url));
+  staged = [];
+  document.getElementById('stagedThumbs').innerHTML = '';
   okEl.textContent = `✓ ${paths.length} photo(s) submitted!`;
 }
 
