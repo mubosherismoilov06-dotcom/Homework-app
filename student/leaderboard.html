@@ -109,7 +109,7 @@ function formatPeriodLabel(data) {
 async function load() {
   document.getElementById('periodLabel').textContent = 'Loading…';
   document.getElementById('list').innerHTML = '';
-  const res = await authedFetch(`/leaderboard?period=${period}&date=${refDate}`);
+  const res = await authedFetch(`${SUPABASE_URL}/functions/v1/leaderboard?period=${period}&date=${refDate}`);
   if (!res) return; // authedFetch already redirected to login
   const data = await res.json();
   if (!res.ok || data.error) {
